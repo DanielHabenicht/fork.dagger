@@ -56,12 +56,33 @@ const (
 type filterFS struct {
 	fs FS
 
-	includeMatcher              *patternmatcher.PatternMatcher
-	excludeMatcher              *patternmatcher.PatternMatcher
-	onlyPrefixIncludes          bool
-	onlyPrefixExcludeExceptions bool
+	includeMatcher     *patternmatcher.PatternMatcher
+	excludeMatcher     *patternmatcher.PatternMatcher
+	onlyPrefixIncludes bool
+	// excludePatterns holds per-pattern metadata for the exclude matcher,
+	// index-aligned with excludeMatcher.Patterns(). It is used to decide
+	// whether an excluded directory can be pruned (filepath.SkipDir) without
+	// dropping any descendant that a higher-precedence re-include would keep.
+	excludePatterns []excludePattern
 
 	mapFn MapFunc
+}
+
+// excludePattern is precomputed metadata about a single exclude pattern.
+type excludePattern struct {
+	// exclusion reports whether the pattern is a re-include ("!"-prefixed).
+	exclusion bool
+	// prefix is the pattern with any trailing glob stripped (see
+	// patternWithoutTrailingGlob), used for the literal-prefix containment
+	// check.
+	prefix string
+	// wildcard reports whether prefix still contains wildcard characters, i.e.
+	// the pattern can match at an unknown depth.
+	wildcard bool
+	// matcher is a single-pattern matcher used to test whether this pattern
+	// matches a given directory. Only populated for non-exclusion (exclude)
+	// patterns, which is all canPruneExcludedDir needs.
+	matcher *patternmatcher.PatternMatcher
 }
 
 // NewFilterFS creates a new FS that filters the given FS using the given
@@ -101,11 +122,11 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 	}
 
 	var (
-		includeMatcher              *patternmatcher.PatternMatcher
-		excludeMatcher              *patternmatcher.PatternMatcher
-		err                         error
-		onlyPrefixIncludes          = true
-		onlyPrefixExcludeExceptions = true
+		includeMatcher     *patternmatcher.PatternMatcher
+		excludeMatcher     *patternmatcher.PatternMatcher
+		err                error
+		onlyPrefixIncludes = true
+		excludePatterns    []excludePattern
 	)
 
 	if len(includePatterns) > 0 {
@@ -128,21 +149,35 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 			return nil, errors.Wrapf(err, "invalid excludepatterns: %s", opt.ExcludePatterns)
 		}
 
-		for _, p := range excludeMatcher.Patterns() {
-			if p.Exclusion() && strings.ContainsAny(patternWithoutTrailingGlob(p), patternChars) {
-				onlyPrefixExcludeExceptions = false
-				break
+		pats := excludeMatcher.Patterns()
+		excludePatterns = make([]excludePattern, len(pats))
+		for i, p := range pats {
+			prefix := patternWithoutTrailingGlob(p)
+			ep := excludePattern{
+				exclusion: p.Exclusion(),
+				prefix:    prefix,
+				wildcard:  strings.ContainsAny(prefix, patternChars),
 			}
+			// Only non-exclusion (exclude) patterns need a matcher: pruning
+			// looks for the highest-precedence exclude that covers a directory.
+			if !p.Exclusion() {
+				sm, err := patternmatcher.New([]string{p.String()})
+				if err != nil {
+					return nil, errors.Wrapf(err, "invalid excludepattern: %s", p.String())
+				}
+				ep.matcher = sm
+			}
+			excludePatterns[i] = ep
 		}
 	}
 
 	return &filterFS{
-		fs:                          fs,
-		includeMatcher:              includeMatcher,
-		excludeMatcher:              excludeMatcher,
-		onlyPrefixIncludes:          onlyPrefixIncludes,
-		onlyPrefixExcludeExceptions: onlyPrefixExcludeExceptions,
-		mapFn:                       opt.Map,
+		fs:                 fs,
+		includeMatcher:     includeMatcher,
+		excludeMatcher:     excludeMatcher,
+		onlyPrefixIncludes: onlyPrefixIncludes,
+		excludePatterns:    excludePatterns,
+		mapFn:              opt.Map,
 	}, nil
 }
 
@@ -266,27 +301,13 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 			}
 
 			if m {
-				if isDir && fs.onlyPrefixExcludeExceptions {
-					// Optimization: we can skip walking this dir if no
-					// exceptions to exclude patterns could match anything
-					// inside it.
-					if !fs.excludeMatcher.Exclusions() {
-						return filepath.SkipDir
-					}
-
-					dirSlash := path + string(filepath.Separator)
-					for _, pat := range fs.excludeMatcher.Patterns() {
-						if !pat.Exclusion() {
-							continue
-						}
-						patStr := patternWithoutTrailingGlob(pat) + string(filepath.Separator)
-						if strings.HasPrefix(patStr, dirSlash) {
-							goto passedExcludeFilter
-						}
-					}
+				// Optimization: skip walking an excluded directory entirely
+				// when no re-include ("!") pattern could resurrect anything
+				// inside it. This avoids descending into large excluded trees
+				// like node_modules.
+				if isDir && fs.canPruneExcludedDir(path) {
 					return filepath.SkipDir
 				}
-			passedExcludeFilter:
 				skip = true
 			}
 		}
@@ -413,6 +434,50 @@ func WalkDir(ctx context.Context, p string, opt *FilterOpt, fn gofs.WalkDirFunc)
 		return err
 	}
 	return f.Walk(ctx, "/", fn)
+}
+
+// canPruneExcludedDir reports whether an already-excluded directory can be
+// skipped entirely (filepath.SkipDir) without dropping any descendant that a
+// re-include ("!") pattern would otherwise keep.
+//
+// The directory is excluded, so some exclude pattern matches it; that pattern
+// also matches every descendant via parent-match, so it overrides any
+// re-include with lower precedence (an earlier index). Pruning is therefore
+// only unsafe if a re-include with HIGHER precedence than that exclude could
+// match something inside the directory. A re-include can reach inside when it
+// has a wildcard prefix (matches at any depth) or a literal prefix pointing
+// into the directory.
+func (fs *filterFS) canPruneExcludedDir(path string) bool {
+	// Find the highest-precedence exclude (non-"!") pattern that covers this
+	// directory. It exists because the directory is excluded.
+	winIdx := -1
+	for i := len(fs.excludePatterns) - 1; i >= 0; i-- {
+		ep := fs.excludePatterns[i]
+		if ep.exclusion || ep.matcher == nil {
+			continue
+		}
+		if matched, err := ep.matcher.MatchesOrParentMatches(path); err == nil && matched {
+			winIdx = i
+			break
+		}
+	}
+
+	dirSlash := path + string(filepath.Separator)
+	for i := winIdx + 1; i < len(fs.excludePatterns); i++ {
+		ep := fs.excludePatterns[i]
+		if !ep.exclusion {
+			continue
+		}
+		if ep.wildcard {
+			// Wildcard prefix: may match at any depth, including inside dir.
+			return false
+		}
+		if strings.HasPrefix(ep.prefix+string(filepath.Separator), dirSlash) {
+			// Literal prefix points inside dir.
+			return false
+		}
+	}
+	return true
 }
 
 func patternWithoutTrailingGlob(p *patternmatcher.Pattern) string {
