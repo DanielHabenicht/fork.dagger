@@ -242,6 +242,20 @@ func (c *entrypointFuncCtx) renderArgCall(arg *TypedefArgument) string {
 		}
 		opts["ignore"] = "[" + strings.Join(ignores, ", ") + "]"
 	}
+	if len(arg.Include) > 0 {
+		includes := make([]string, len(arg.Include))
+		for i, p := range arg.Include {
+			includes[i] = jsString(p)
+		}
+		opts["include"] = "[" + strings.Join(includes, ", ") + "]"
+	}
+	if len(arg.Exclude) > 0 {
+		excludes := make([]string, len(arg.Exclude))
+		for i, p := range arg.Exclude {
+			excludes[i] = jsString(p)
+		}
+		opts["exclude"] = "[" + strings.Join(excludes, ", ") + "]"
+	}
 	td := c.renderTypeDef(arg.Type)
 	if arg.IsOptional {
 		td += ".withOptional(true)"

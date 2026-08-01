@@ -60,6 +60,8 @@ type TypedefArgument struct {
 	DefaultPath    string           `json:"defaultPath,omitempty"`
 	DefaultAddress string           `json:"defaultAddress,omitempty"`
 	Ignore         []string         `json:"ignore,omitempty"`
+	Include        []string         `json:"include,omitempty"`
+	Exclude        []string         `json:"exclude,omitempty"`
 	Location       *TypedefLocation `json:"location,omitempty"`
 }
 
