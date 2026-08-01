@@ -49,6 +49,33 @@
           "returnType": {
             "kind": "STRING_KIND"
           }
+        },
+        "helloWorldIncludeExclude": {
+          "name": "helloWorldIncludeExclude",
+          "description": "",
+          "arguments": {
+            "dir": {
+              "name": "dir",
+              "description": "",
+              "type": {
+                "kind": "OBJECT_KIND",
+                "name": "Directory"
+              },
+              "isVariadic": false,
+              "isNullable": false,
+              "isOptional": false,
+              "defaultPath": ".",
+              "include": [
+                "**/*.webp"
+              ],
+              "exclude": [
+                "**/node_modules"
+              ]
+            }
+          },
+          "returnType": {
+            "kind": "STRING_KIND"
+          }
         }
       },
       "properties": {}

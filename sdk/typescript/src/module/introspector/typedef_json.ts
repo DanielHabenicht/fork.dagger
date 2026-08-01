@@ -91,6 +91,8 @@ function serializeArgument(arg: DaggerArgument) {
     defaultPath: arg.defaultPath,
     defaultAddress: arg.defaultAddress,
     ignore: arg.ignore,
+    include: arg.include,
+    exclude: arg.exclude,
     location: arg.getLocation(),
   }
 }

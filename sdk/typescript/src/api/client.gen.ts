@@ -1674,9 +1674,19 @@ export type FunctionWithArgOpts = {
   defaultPath?: string
 
   /**
-   * Patterns to ignore when loading the contextual argument value.
+   * Patterns to ignore when loading the contextual argument value. Deprecated: use exclude instead.
    */
   ignore?: string[]
+
+  /**
+   * Only load entries matching these patterns when loading the contextual argument value. Applied before exclude.
+   */
+  include?: string[]
+
+  /**
+   * Patterns to exclude when loading the contextual argument value. Applied after include and takes precedence over it.
+   */
+  exclude?: string[]
 
   /**
    * The source map for the argument definition.

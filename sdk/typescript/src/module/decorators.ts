@@ -64,7 +64,11 @@ export const enumType = registry.enumType
  * @param opts.defaultPath Only applies to arguments of type File or Directory. If the argument is not set,
  * load it from the given path in the context directory.
  * @param opts.ignore Only applies to arguments of type Directory. The ignore patterns are applied to the input directory,
- * and matching entries are filtered out, in a cache-efficient manner..
+ * and matching entries are filtered out, in a cache-efficient manner. Deprecated: use `exclude` instead.
+ * @param opts.include Only applies to arguments of type Directory. Only entries matching these patterns are loaded
+ * from the input directory, applied before `exclude`, in a cache-efficient manner.
+ * @param opts.exclude Only applies to arguments of type Directory. Entries matching these patterns are filtered out
+ * of the input directory, applied after `include` and taking precedence over it, in a cache-efficient manner.
  *
  * Relative paths are relative to the current source files.
  * Absolute paths are rooted to the module context directory.

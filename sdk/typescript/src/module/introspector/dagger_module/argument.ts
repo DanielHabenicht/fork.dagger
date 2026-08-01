@@ -28,6 +28,8 @@ export class DaggerArgument extends Locatable {
   public defaultPath?: string
   public defaultAddress?: string
   public ignore?: string[]
+  public include?: string[]
+  public exclude?: string[]
   public defaultValue?: any
 
   private symbol: ts.Symbol
@@ -67,6 +69,8 @@ export class DaggerArgument extends Locatable {
 
     if (decoratorArguments) {
       this.ignore = decoratorArguments.ignore
+      this.include = decoratorArguments.include
+      this.exclude = decoratorArguments.exclude
       this.defaultPath = decoratorArguments.defaultPath
       this.defaultAddress = decoratorArguments.defaultAddress
 
@@ -164,6 +168,8 @@ export class DaggerArgument extends Locatable {
       defaultPath: this.defaultPath,
       defaultAddress: this.defaultAddress,
       ignore: this.ignore,
+      include: this.include,
+      exclude: this.exclude,
     }
   }
 }

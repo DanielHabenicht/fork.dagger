@@ -234,6 +234,14 @@ export class Register {
           opts.ignore = arg.ignore
         }
 
+        if (arg.include) {
+          opts.include = arg.include
+        }
+
+        if (arg.exclude) {
+          opts.exclude = arg.exclude
+        }
+
         fct = fct.withArg(arg.name, typeDef, opts)
       })
 

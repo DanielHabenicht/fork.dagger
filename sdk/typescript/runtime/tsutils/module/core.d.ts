@@ -15,7 +15,10 @@ export class BaseClient {}
 
 export type ArgumentOptions = {
   defaultPath?: string
+  defaultAddress?: string
   ignore?: string[]
+  include?: string[]
+  exclude?: string[]
 }
 
 export function func(alias?: string): MethodDecorator

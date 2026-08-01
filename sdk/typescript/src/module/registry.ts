@@ -44,8 +44,26 @@ export type ArgumentOptions = {
    * Patterns to ignore when loading the contextual argument value.
    *
    * This should only be used for Directory types.
+   *
+   * @deprecated Use `exclude` instead.
    */
   ignore?: string[]
+
+  /**
+   * Only load entries matching these patterns when loading the contextual
+   * argument value. Applied before `exclude`.
+   *
+   * This should only be used for Directory types.
+   */
+  include?: string[]
+
+  /**
+   * Patterns to exclude when loading the contextual argument value. Applied
+   * after `include` and taking precedence over it.
+   *
+   * This should only be used for Directory types.
+   */
+  exclude?: string[]
 }
 
 export type FunctionOptions = {

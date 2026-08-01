@@ -18,4 +18,12 @@ export class Context {
   ): string {
     return `hello ${name}`
   }
+
+  @func()
+  helloWorldIncludeExclude(
+    @argument({ defaultPath: ".", include: ["**/*.webp"], exclude: ["**/node_modules"] })
+    dir: Directory,
+  ): string {
+    return `hello ${name}`
+  }
 }

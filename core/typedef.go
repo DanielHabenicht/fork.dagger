@@ -459,7 +459,7 @@ func (fn *Function) LookupArg(nameAnyCase string) (dagql.ObjectResult[*FunctionA
 	return dagql.ObjectResult[*FunctionArg]{}, false
 }
 
-func NewFunctionArg(name string, typeDef dagql.ObjectResult[*TypeDef], desc string, defaultValue JSON, defaultPath string, defaultAddress string, ignore []string, deprecated *string) *FunctionArg {
+func NewFunctionArg(name string, typeDef dagql.ObjectResult[*TypeDef], desc string, defaultValue JSON, defaultPath string, defaultAddress string, ignore []string, include []string, exclude []string, deprecated *string) *FunctionArg {
 	return &FunctionArg{
 		Name:           strcase.ToLowerCamel(name),
 		Description:    desc,
@@ -468,6 +468,8 @@ func NewFunctionArg(name string, typeDef dagql.ObjectResult[*TypeDef], desc stri
 		DefaultPath:    defaultPath,
 		DefaultAddress: defaultAddress,
 		Ignore:         ignore,
+		Include:        include,
+		Exclude:        exclude,
 		Deprecated:     deprecated,
 		OriginalName:   name,
 	}
@@ -511,7 +513,9 @@ type FunctionArg struct {
 	DefaultValue   JSON     `field:"true" doc:"A default value to use for this argument when not explicitly set by the caller, if any." doNotCache:"simple field selection"`
 	DefaultPath    string   `field:"true" doc:"Only applies to arguments of type File or Directory. If the argument is not set, load it from the given path in the context directory" doNotCache:"simple field selection"`
 	DefaultAddress string   `field:"true" doc:"Only applies to arguments of type Container. If the argument is not set, load it from the given address (e.g. alpine:latest)" doNotCache:"simple field selection"`
-	Ignore         []string `field:"true" doc:"Only applies to arguments of type Directory. The ignore patterns are applied to the input directory, and matching entries are filtered out, in a cache-efficient manner." doNotCache:"simple field selection"`
+	Ignore         []string `field:"true" doc:"Only applies to arguments of type Directory. The ignore patterns are applied to the input directory, and matching entries are filtered out, in a cache-efficient manner. Deprecated: use Exclude instead." doNotCache:"simple field selection"`
+	Include        []string `field:"true" doc:"Only applies to arguments of type Directory. Only entries matching these patterns are loaded from the input directory, applied before Exclude, in a cache-efficient manner." doNotCache:"simple field selection"`
+	Exclude        []string `field:"true" doc:"Only applies to arguments of type Directory. Entries matching these patterns are filtered out of the input directory, applied after Include and taking precedence over it, in a cache-efficient manner." doNotCache:"simple field selection"`
 	Deprecated     *string  `field:"true" doc:"The reason this function is deprecated, if any."`
 
 	// Below are not in public API
@@ -632,6 +636,36 @@ func (arg *FunctionArg) WithIgnore(ignore []string) *FunctionArg {
 	return arg
 }
 
+func (arg *FunctionArg) WithInclude(include []string) *FunctionArg {
+	if stringSlicesEqual(arg.Include, include) {
+		return arg
+	}
+	arg = arg.Clone()
+	arg.Include = append([]string(nil), include...)
+	return arg
+}
+
+func (arg *FunctionArg) WithExclude(exclude []string) *FunctionArg {
+	if stringSlicesEqual(arg.Exclude, exclude) {
+		return arg
+	}
+	arg = arg.Clone()
+	arg.Exclude = append([]string(nil), exclude...)
+	return arg
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Type returns the GraphQL FunctionArg! type.
 func (*FunctionArg) Type() *ast.Type {
 	return &ast.Type{
@@ -735,7 +769,42 @@ func (arg FunctionArg) Directives() []*ast.Directive {
 			},
 		})
 	}
+	if d := patternsDirective("includePatterns", arg.Include); d != nil {
+		directives = append(directives, d)
+	}
+	if d := patternsDirective("excludePatterns", arg.Exclude); d != nil {
+		directives = append(directives, d)
+	}
 	return directives
+}
+
+// patternsDirective builds an argument-definition directive carrying a list of
+// glob patterns (used for include/exclude), or nil when there are none.
+func patternsDirective(name string, patterns []string) *ast.Directive {
+	if len(patterns) == 0 {
+		return nil
+	}
+	var children ast.ChildValueList
+	for _, p := range patterns {
+		children = append(children, &ast.ChildValue{
+			Value: &ast.Value{
+				Kind: ast.StringValue,
+				Raw:  p,
+			},
+		})
+	}
+	return &ast.Directive{
+		Name: name,
+		Arguments: ast.ArgumentList{
+			&ast.Argument{
+				Name: "patterns",
+				Value: &ast.Value{
+					Kind:     ast.ListValue,
+					Children: children,
+				},
+			},
+		},
+	}
 }
 
 type TypeDef struct {
@@ -2658,6 +2727,8 @@ type persistedFunctionArg struct {
 	DefaultPath       string   `json:"defaultPath,omitempty"`
 	DefaultAddress    string   `json:"defaultAddress,omitempty"`
 	Ignore            []string `json:"ignore,omitempty"`
+	Include           []string `json:"include,omitempty"`
+	Exclude           []string `json:"exclude,omitempty"`
 	Deprecated        *string  `json:"deprecated,omitempty"`
 	OriginalName      string   `json:"originalName,omitempty"`
 }
@@ -2791,6 +2862,8 @@ func encodePersistedFunctionArg(cache dagql.PersistedObjectCache, arg *FunctionA
 		DefaultPath:    arg.DefaultPath,
 		DefaultAddress: arg.DefaultAddress,
 		Ignore:         append([]string(nil), arg.Ignore...),
+		Include:        append([]string(nil), arg.Include...),
+		Exclude:        append([]string(nil), arg.Exclude...),
 		Deprecated:     arg.Deprecated,
 		OriginalName:   arg.OriginalName,
 	}
@@ -2825,6 +2898,8 @@ func decodePersistedFunctionArg(ctx context.Context, dag *dagql.Server, arg *per
 		DefaultPath:    arg.DefaultPath,
 		DefaultAddress: arg.DefaultAddress,
 		Ignore:         append([]string(nil), arg.Ignore...),
+		Include:        append([]string(nil), arg.Include...),
+		Exclude:        append([]string(nil), arg.Exclude...),
 		Deprecated:     arg.Deprecated,
 		OriginalName:   arg.OriginalName,
 	}

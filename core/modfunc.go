@@ -1066,8 +1066,15 @@ func (fn *ModuleFunction) loadContextualArg(
 
 	switch arg.TypeDef.Self().AsObject.Value.Self().Name {
 	case "Directory":
+		// exclude is the canonical field; ignore is kept as a fallback for
+		// non-breaking migration of modules that predate include/exclude.
+		exclude := arg.Exclude
+		if len(exclude) == 0 {
+			exclude = arg.Ignore
+		}
 		dir, err := fn.mod.Self().ContextSource.Value.Self().LoadContextDir(ctx, dag, arg.DefaultPath, CopyFilter{
-			Exclude: arg.Ignore,
+			Include: arg.Include,
+			Exclude: exclude,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("load contextual directory %q: %w", arg.DefaultPath, err)

@@ -1901,3 +1901,99 @@ func (ModuleSuite) TestDefaultPathNoCache(ctx context.Context, t *testctx.T) {
 		require.Equal(t, newContent, res2.Test.ReadFile)
 	})
 }
+
+// TestContextDirectoryIncludeExclude covers the include/exclude patterns on a
+// contextual Directory argument (dagger/dagger#13753). It mirrors the issue's
+// monorepo shape: apps with large node_modules dirs alongside the files the
+// module actually wants. It exercises each of the new `include` and `exclude`
+// options on its own, their combination (exclude takes precedence over
+// include), and the deprecated `ignore` option as a fallback.
+func (ModuleSuite) TestContextDirectoryIncludeExclude(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	source := `import { Directory, object, func, argument } from "@dagger.io/dagger"
+
+@object()
+export class Minimal {
+  // include + exclude together: only .webp is loaded, and exclude takes
+  // precedence, so the .webp nested inside node_modules is dropped.
+  @func()
+  async probeIncludeExclude(
+    @argument({ defaultPath: "/", include: ["**/*.webp"], exclude: ["**/node_modules/**"] })
+    dir: Directory,
+  ): Promise<string[]> {
+    return (await dir.glob("**/*.webp")).sort()
+  }
+
+  // exclude on its own: node_modules contents are filtered out.
+  @func()
+  async probeExclude(
+    @argument({ defaultPath: "/", exclude: ["**/node_modules/**"] })
+    dir: Directory,
+  ): Promise<string[]> {
+    return (await dir.glob("**/*.webp")).sort()
+  }
+
+  // include on its own is an allowlist: every .webp is loaded.
+  @func()
+  async probeInclude(
+    @argument({ defaultPath: "/", include: ["**/*.webp"] })
+    dir: Directory,
+  ): Promise<string[]> {
+    return (await dir.glob("**/*.webp")).sort()
+  }
+
+  // Deprecated ignore option still works as a fallback for exclude.
+  @func()
+  async probeIgnore(
+    @argument({ defaultPath: "/", ignore: ["**/node_modules/**"] })
+    dir: Directory,
+  ): Promise<string[]> {
+    return (await dir.glob("**/*.webp")).sort()
+  }
+}
+`
+
+	modGen := goGitBase(t, c).
+		WithNewFile("/work/apps/app1/image.webp", "webp1").
+		WithNewFile("/work/apps/app1/node_modules/junk.js", "junk").
+		WithNewFile("/work/apps/app1/node_modules/nested.webp", "nested").
+		WithNewFile("/work/apps/app2/image.webp", "webp2").
+		WithNewFile("/work/apps/app2/node_modules/junk.js", "junk").
+		With(withModuleFixture(t, c, "/work/ci", "typescript/base-minimal")).
+		With(sdkSourceAt("/work/ci", "typescript", source)).
+		WithWorkdir("/work")
+
+	readWebps := func(ctx context.Context, t *testctx.T, fn string) []string {
+		out, err := modGen.With(daggerCallAt("ci", fn)).Stdout(ctx)
+		require.NoError(t, err)
+		var webps []string
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				webps = append(webps, line)
+			}
+		}
+		return webps
+	}
+
+	// include+exclude, exclude-only, and the ignore fallback all drop the
+	// node_modules contents (including the nested .webp), leaving only the two
+	// top-level images.
+	for _, fn := range []string{"probe-include-exclude", "probe-exclude", "probe-ignore"} {
+		t.Run(fn, func(ctx context.Context, t *testctx.T) {
+			webps := readWebps(ctx, t, fn)
+			require.ElementsMatch(t, []string{"apps/app1/image.webp", "apps/app2/image.webp"}, webps)
+		})
+	}
+
+	// include on its own is an allowlist: every .webp is loaded, including the
+	// one nested in node_modules.
+	t.Run("probe-include", func(ctx context.Context, t *testctx.T) {
+		webps := readWebps(ctx, t, "probe-include")
+		require.ElementsMatch(t, []string{
+			"apps/app1/image.webp",
+			"apps/app1/node_modules/nested.webp",
+			"apps/app2/image.webp",
+		}, webps)
+	})
+}
