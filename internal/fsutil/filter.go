@@ -61,9 +61,15 @@ type filterFS struct {
 	onlyPrefixIncludes bool
 	// excludePatterns holds per-pattern metadata for the exclude matcher,
 	// index-aligned with excludeMatcher.Patterns(). It is used to decide
-	// whether an excluded directory can be pruned (filepath.SkipDir) without
-	// dropping any descendant that a higher-precedence re-include would keep.
+	// whether a directory whose entire subtree is excluded can be pruned
+	// (filepath.SkipDir) without dropping any descendant that a
+	// higher-precedence re-include would keep.
 	excludePatterns []excludePattern
+	// hasSubtreeExclude is true when some exclude pattern targets a whole
+	// subtree ("X/**") rather than the directory itself. Such patterns don't
+	// match the directory node, so pruning must also be considered at
+	// directories that are not themselves excluded.
+	hasSubtreeExclude bool
 
 	mapFn MapFunc
 }
@@ -79,9 +85,12 @@ type excludePattern struct {
 	// wildcard reports whether prefix still contains wildcard characters, i.e.
 	// the pattern can match at an unknown depth.
 	wildcard bool
-	// matcher is a single-pattern matcher used to test whether this pattern
-	// matches a given directory. Only populated for non-exclusion (exclude)
-	// patterns, which is all canPruneExcludedDir needs.
+	// matcher tests whether this pattern covers a directory's whole subtree.
+	// For a plain pattern it is the pattern itself (a match on the directory
+	// covers all descendants via parent-match); for a subtree pattern ("X/**")
+	// it is built from the prefix ("X"), which matches the directory whose
+	// contents the pattern excludes. Only populated for non-exclusion (exclude)
+	// patterns, which is all canPruneDir needs.
 	matcher *patternmatcher.PatternMatcher
 }
 
@@ -127,6 +136,7 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 		err                error
 		onlyPrefixIncludes = true
 		excludePatterns    []excludePattern
+		hasSubtreeExclude  bool
 	)
 
 	if len(includePatterns) > 0 {
@@ -151,6 +161,7 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 
 		pats := excludeMatcher.Patterns()
 		excludePatterns = make([]excludePattern, len(pats))
+		subtreeSuffix := string(filepath.Separator) + "**"
 		for i, p := range pats {
 			prefix := patternWithoutTrailingGlob(p)
 			ep := excludePattern{
@@ -158,10 +169,19 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 				prefix:    prefix,
 				wildcard:  strings.ContainsAny(prefix, patternChars),
 			}
-			// Only non-exclusion (exclude) patterns need a matcher: pruning
-			// looks for the highest-precedence exclude that covers a directory.
+			// Only non-exclusion (exclude) patterns need a cover matcher:
+			// pruning looks for the highest-precedence exclude that covers a
+			// directory's whole subtree.
 			if !p.Exclusion() {
-				sm, err := patternmatcher.New([]string{p.String()})
+				// A subtree pattern ("X/**") excludes a directory's contents but
+				// not the directory node, so match against its prefix ("X"),
+				// which does identify that directory.
+				matcherSrc := p.String()
+				if strings.HasSuffix(p.String(), subtreeSuffix) && prefix != "" {
+					matcherSrc = prefix
+					hasSubtreeExclude = true
+				}
+				sm, err := patternmatcher.New([]string{matcherSrc})
 				if err != nil {
 					return nil, errors.Wrapf(err, "invalid excludepattern: %s", p.String())
 				}
@@ -177,6 +197,7 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 		excludeMatcher:     excludeMatcher,
 		onlyPrefixIncludes: onlyPrefixIncludes,
 		excludePatterns:    excludePatterns,
+		hasSubtreeExclude:  hasSubtreeExclude,
 		mapFn:              opt.Map,
 	}, nil
 }
@@ -300,14 +321,16 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 				dir.excludeMatchInfo = matchInfo
 			}
 
+			// Optimization: skip walking a directory whose entire subtree is
+			// excluded when no re-include ("!") pattern could resurrect
+			// anything inside it. This avoids descending into large excluded
+			// trees like node_modules. A subtree pattern ("X/**") excludes the
+			// contents without matching the directory node, so this is checked
+			// whenever such a pattern exists, not only when the dir matches.
+			if isDir && (m || fs.hasSubtreeExclude) && fs.canPruneDir(path) {
+				return filepath.SkipDir
+			}
 			if m {
-				// Optimization: skip walking an excluded directory entirely
-				// when no re-include ("!") pattern could resurrect anything
-				// inside it. This avoids descending into large excluded trees
-				// like node_modules.
-				if isDir && fs.canPruneExcludedDir(path) {
-					return filepath.SkipDir
-				}
 				skip = true
 			}
 		}
@@ -436,20 +459,22 @@ func WalkDir(ctx context.Context, p string, opt *FilterOpt, fn gofs.WalkDirFunc)
 	return f.Walk(ctx, "/", fn)
 }
 
-// canPruneExcludedDir reports whether an already-excluded directory can be
-// skipped entirely (filepath.SkipDir) without dropping any descendant that a
+// canPruneDir reports whether a directory whose entire subtree is excluded can
+// be skipped (filepath.SkipDir) without dropping any descendant that a
 // re-include ("!") pattern would otherwise keep.
 //
-// The directory is excluded, so some exclude pattern matches it; that pattern
-// also matches every descendant via parent-match, so it overrides any
-// re-include with lower precedence (an earlier index). Pruning is therefore
-// only unsafe if a re-include with HIGHER precedence than that exclude could
-// match something inside the directory. A re-include can reach inside when it
-// has a wildcard prefix (matches at any depth) or a literal prefix pointing
-// into the directory.
-func (fs *filterFS) canPruneExcludedDir(path string) bool {
-	// Find the highest-precedence exclude (non-"!") pattern that covers this
-	// directory. It exists because the directory is excluded.
+// It finds the highest-precedence exclude pattern that covers the directory's
+// subtree (either matching the directory itself, or, for a "X/**" pattern,
+// matching it via the prefix). That covering exclude also applies to every
+// descendant, so it overrides any re-include with lower precedence (an earlier
+// index). Pruning is therefore only unsafe if a re-include with HIGHER
+// precedence could match something inside the directory. A re-include can
+// reach inside when it has a wildcard prefix (matches at any depth) or a
+// literal prefix pointing into the directory. If nothing covers the subtree,
+// the directory cannot be pruned.
+func (fs *filterFS) canPruneDir(path string) bool {
+	// Find the highest-precedence exclude (non-"!") pattern whose cover matcher
+	// matches this directory.
 	winIdx := -1
 	for i := len(fs.excludePatterns) - 1; i >= 0; i-- {
 		ep := fs.excludePatterns[i]
@@ -460,6 +485,11 @@ func (fs *filterFS) canPruneExcludedDir(path string) bool {
 			winIdx = i
 			break
 		}
+	}
+
+	// Nothing covers this directory's whole subtree, so it must be walked.
+	if winIdx == -1 {
+		return false
 	}
 
 	dirSlash := path + string(filepath.Separator)
