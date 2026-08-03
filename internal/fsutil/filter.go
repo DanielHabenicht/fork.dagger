@@ -85,12 +85,13 @@ type excludePattern struct {
 	// wildcard reports whether prefix still contains wildcard characters, i.e.
 	// the pattern can match at an unknown depth.
 	wildcard bool
-	// matcher tests whether this pattern covers a directory's whole subtree.
-	// For a plain pattern it is the pattern itself (a match on the directory
-	// covers all descendants via parent-match); for a subtree pattern ("X/**")
-	// it is built from the prefix ("X"), which matches the directory whose
-	// contents the pattern excludes. Only populated for non-exclusion (exclude)
-	// patterns, which is all canPruneDir needs.
+	// matcher tests whether this pattern matches a directory. For a plain
+	// exclude it is the pattern itself (a match on the directory covers all
+	// descendants via parent-match); for a subtree exclude ("X/**") it is built
+	// from the prefix ("X"), which matches the directory whose contents the
+	// pattern excludes; for a re-include it is the (positive form of the)
+	// pattern, so canPruneDir can tell whether the re-include reaches into a
+	// directory from above.
 	matcher *patternmatcher.PatternMatcher
 }
 
@@ -169,24 +170,22 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 				prefix:    prefix,
 				wildcard:  strings.ContainsAny(prefix, patternChars),
 			}
-			// Only non-exclusion (exclude) patterns need a cover matcher:
-			// pruning looks for the highest-precedence exclude that covers a
-			// directory's whole subtree.
-			if !p.Exclusion() {
-				// A subtree pattern ("X/**") excludes a directory's contents but
-				// not the directory node, so match against its prefix ("X"),
-				// which does identify that directory.
-				matcherSrc := p.String()
-				if strings.HasSuffix(p.String(), subtreeSuffix) && prefix != "" {
-					matcherSrc = prefix
-					hasSubtreeExclude = true
-				}
-				sm, err := patternmatcher.New([]string{matcherSrc})
-				if err != nil {
-					return nil, errors.Wrapf(err, "invalid excludepattern: %s", p.String())
-				}
-				ep.matcher = sm
+			// Both exclude and re-include patterns get a matcher, used by
+			// canPruneDir. For a non-exclusion "X/**" subtree pattern, match on
+			// the prefix ("X") since the pattern excludes a directory's contents
+			// without matching the directory node itself. Every other pattern
+			// (including re-includes) matches on its own form so canPruneDir can
+			// tell whether a re-include reaches into a directory from above.
+			matcherSrc := p.String()
+			if !p.Exclusion() && strings.HasSuffix(p.String(), subtreeSuffix) && prefix != "" {
+				matcherSrc = prefix
+				hasSubtreeExclude = true
 			}
+			sm, err := patternmatcher.New([]string{matcherSrc})
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid excludepattern: %s", p.String())
+			}
+			ep.matcher = sm
 			excludePatterns[i] = ep
 		}
 	}
@@ -498,12 +497,21 @@ func (fs *filterFS) canPruneDir(path string) bool {
 		if !ep.exclusion {
 			continue
 		}
+		// The re-include matches this directory or an ancestor, so via
+		// parent-match it re-includes entries within the directory (e.g.
+		// "!a/b/**" while walking a/b/c). Its own trailing glob is stripped
+		// from prefix, so this catches what the checks below would miss.
+		if ep.matcher != nil {
+			if m, err := ep.matcher.MatchesOrParentMatches(path); err == nil && m {
+				return false
+			}
+		}
+		// Wildcard prefix: may match at any depth, including inside dir.
 		if ep.wildcard {
-			// Wildcard prefix: may match at any depth, including inside dir.
 			return false
 		}
+		// Literal prefix points inside dir.
 		if strings.HasPrefix(ep.prefix+string(filepath.Separator), dirSlash) {
-			// Literal prefix points inside dir.
 			return false
 		}
 	}
