@@ -106,11 +106,11 @@ func (UpSuite) TestUpEnvServices(ctx context.Context, t *testctx.T) {
 	require.NoError(t, err)
 	modGen = modGen.WithWorkdir("hello-with-services")
 
-	// Call the module's CurrentEnvServices function which queries
-	// dag.CurrentEnv().Services().List() to verify services are visible
-	// from within the module execution context.
+	// Call the module's WorkspaceServices function, which lists
+	// Workspace.services via an auto-injected Workspace arg, to verify
+	// services are visible from within the module execution context.
 	out, err := modGen.
-		With(daggerExec("call", "current-env-services")).
+		With(daggerExec("call", "workspace-services")).
 		CombinedOutput(ctx)
 	require.NoError(t, err)
 	require.Contains(t, out, "web")
@@ -131,6 +131,35 @@ func (UpSuite) TestUpPortCollision(ctx context.Context, t *testctx.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, "port collision")
 	require.Contains(t, out, "8080")
+}
+
+func (UpSuite) TestUpValidationRejectsBadSignature(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	t.Run("wrong return type", func(ctx context.Context, t *testctx.T) {
+		modGen, err := upTestEnv(t, c)
+		require.NoError(t, err)
+
+		// badup-return's @up returns Container!, which must be rejected at module load.
+		out, err := modGen.WithWorkdir("badup-return").
+			With(daggerExecFail("up", "-l")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "@up functions must return the core Service! type")
+	})
+
+	t.Run("required arg", func(ctx context.Context, t *testctx.T) {
+		modGen, err := upTestEnv(t, c)
+		require.NoError(t, err)
+
+		// badup-arg's @up declares a required `image: String!`, which must be
+		// rejected at module load.
+		out, err := modGen.WithWorkdir("badup-arg").
+			With(daggerExecFail("up", "-l")).
+			CombinedOutput(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "@up functions must be callable with no arguments")
+	})
 }
 
 func (UpSuite) TestUpServiceBinding(ctx context.Context, t *testctx.T) {

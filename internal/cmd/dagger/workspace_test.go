@@ -77,10 +77,14 @@ func TestCosmeticCommandAliases(t *testing.T) {
 	require.True(t, cmd.Hidden)
 	require.Contains(t, cmd.Deprecated, "dagger -m core api call")
 
-	// exec / run moved under `dagger api`; available at root for backward compat
+	// with-session / run moved under `dagger api`; available at root for backward compat
+	cmd, _, err = rootCmd.Find([]string{"api", "with-session"})
+	require.NoError(t, err)
+	require.Same(t, apiWithSessionCmd, cmd)
+
 	cmd, _, err = rootCmd.Find([]string{"api", "exec"})
 	require.NoError(t, err)
-	require.Same(t, apiExecCmd, cmd)
+	require.Same(t, apiWithSessionCmd, cmd)
 
 	cmd, _, err = rootCmd.Find([]string{"run"})
 	require.NoError(t, err)
@@ -260,7 +264,8 @@ func TestRootHelpShowsImplicitCommandGrouping(t *testing.T) {
 func TestHelpAliasesRespectHiddenAliases(t *testing.T) {
 	require.Contains(t, renderHelp(t, workspaceCmd), "workspace, ws")
 
-	execHelp := renderHelp(t, apiExecCmd)
+	execHelp := renderHelp(t, apiWithSessionCmd)
+	require.NotContains(t, execHelp, "with-session, exec")
 	require.NotContains(t, execHelp, "exec, run")
 	require.NotContains(t, execHelp, "exec, r")
 	require.NotContains(t, execHelp, "ALIASES")
@@ -271,6 +276,45 @@ func TestWorkspaceSettingConfigKeyQuotesDynamicSegments(t *testing.T) {
 		`modules."my.module".settings."some.key"`,
 		workspaceSettingConfigKey("my.module", "some.key"),
 	)
+}
+
+func TestWorkspaceConfigRootPathFromCwd(t *testing.T) {
+	tests := []struct {
+		name       string
+		configFile string
+		cwd        string
+		want       string
+	}{
+		{
+			name:       "root cwd",
+			configFile: "dagger.toml",
+			cwd:        "/",
+			want:       "dagger.toml",
+		},
+		{
+			name:       "nested cwd",
+			configFile: "../dagger.toml",
+			cwd:        "/app/sub",
+			want:       filepath.Join("app", "dagger.toml"),
+		},
+		{
+			name:       "selected workspace cwd",
+			configFile: "dagger.toml",
+			cwd:        "/selected",
+			want:       filepath.Join("selected", "dagger.toml"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := workspaceConfigRootPathFromCwd(tt.configFile, tt.cwd)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	_, err := workspaceConfigRootPathFromCwd("../../../outside.toml", "/app/sub")
+	require.ErrorContains(t, err, "escapes workspace root")
 }
 
 func renderHelp(t *testing.T, cmd *cobra.Command) string {
@@ -378,6 +422,22 @@ func TestWorkspaceFlagPolicy(t *testing.T) {
 	require.NoError(t, validateWorkspaceFlagPolicy(workspaceSettingsCmd, []string{"foo", "bar"}))
 	require.ErrorContains(t, validateWorkspaceFlagPolicy(workspaceConfigCmd, []string{"modules.foo.source", "x"}), "must be a local path")
 	require.NoError(t, validateWorkspaceFlagPolicy(workspaceConfigCmd, []string{"modules.foo.source"}))
+
+	// --global writes go to the caller-local user config, so a remote
+	// workspace stays selectable as the key/introspection target.
+	oldSettingsGlobal := workspaceSettingsGlobal
+	oldConfigGlobal := workspaceConfigGlobal
+	t.Cleanup(func() {
+		workspaceSettingsGlobal = oldSettingsGlobal
+		workspaceConfigGlobal = oldConfigGlobal
+	})
+	workspaceSettingsGlobal = true
+	workspaceConfigGlobal = true
+	require.NoError(t, validateWorkspaceFlagPolicy(settingsCmd, []string{"foo", "bar", "baz"}))
+	require.NoError(t, validateWorkspaceFlagPolicy(workspaceSettingsCmd, []string{"foo", "bar", "baz"}))
+	require.NoError(t, validateWorkspaceFlagPolicy(workspaceConfigCmd, []string{"modules.foo.settings.x", "x"}))
+	workspaceSettingsGlobal = false
+	workspaceConfigGlobal = false
 
 	workspaceRef = "./local-workspace"
 	require.NoError(t, validateWorkspaceFlagPolicy(apiCallCmd.Command(), nil))

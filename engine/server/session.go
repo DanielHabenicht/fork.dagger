@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,7 +36,6 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -60,7 +58,6 @@ import (
 	"github.com/dagger/dagger/engine/slog"
 	enginetel "github.com/dagger/dagger/engine/telemetry"
 	"github.com/dagger/dagger/engine/wcprof"
-	cloudauth "github.com/dagger/dagger/internal/cloud/auth"
 	"github.com/dagger/dagger/util/cleanups"
 )
 
@@ -115,14 +112,6 @@ type daggerSession struct {
 	// informed when a client goes away to prevent hanging on drain
 	telemetryPubSub *PubSub
 	seenKeys        sync.Map
-
-	// Dagger Cloud exporters, created once from the main client's auth and
-	// shared by every client in the session; owned (and shut down) by the
-	// session, not by any one client's providers. Guarded by stateMu, which
-	// is held for all client initialization.
-	cloudSpans   sdktrace.SpanExporter
-	cloudLogs    sdklog.Exporter
-	cloudMetrics sdkmetric.Exporter
 
 	services *core.Services
 	resolver *serverresolver.Resolver
@@ -234,9 +223,6 @@ type daggerClient struct {
 	// metadata of that ongoing function call
 	fnCall *core.FunctionCall
 
-	// If the client is executing in an Env context, this is that Env.
-	env dagql.ObjectResult[*core.Env]
-
 	// engine utility job-related state/config
 	hostServiceProxyClientID string
 	getClientCaller          func(context.Context, string) (engineutil.SessionCaller, error)
@@ -266,6 +252,17 @@ type daggerClient struct {
 	workspaceMu          sync.Mutex
 	workspaceLoaded      bool
 	workspaceErr         error
+
+	// workspaceReadEpoch is a monotonically bumped token folded into cached
+	// Workspace.file / Workspace.directory host reads' per-client cache
+	// namespace. Bumped on Workspace.export / Workspace.reloaded so a
+	// long-lived session re-reads
+	// the host after the workspace's on-disk content changed under it, instead
+	// of serving a stale per-client host.directory snapshot cached earlier in
+	// the session. Atomic (not guarded by workspaceMu) so a read resolver can
+	// consult it without risking the workspaceMu that ensureWorkspaceLoaded
+	// holds across module loading.
+	workspaceReadEpoch atomic.Uint64
 
 	// Cached workspace result from ensureWorkspaceLoaded.
 	workspace *core.Workspace
@@ -531,25 +528,6 @@ func (srv *Server) initializeDaggerSession(
 
 var errSessionClosing = errors.New("session is closing")
 
-// sessionTelemetryFlushTimeout is how long the shutdown-time telemetry flush
-// may take. When a command exits, the client gives the engine 10 seconds to
-// shut down (defaultShutdownTimeout in engine/client), then fails the build.
-// The engine flushes telemetry to Dagger Cloud inside that window, and a
-// single export to a hanging Cloud endpoint eats 10s on its own — unbounded,
-// a Cloud outage would spend the whole window: the client gives up first and
-// a successful build exits 1. At 5s the flush gives up early, the engine
-// answers the client in time, and the build passes. A Cloud outage costs
-// telemetry, never the build.
-const sessionTelemetryFlushTimeout = 5 * time.Second
-
-// cloudTokenRefreshTimeout is how long a cloud OAuth token refresh may take.
-// A refresh runs on a deliberately uncancellable context (exports happen on
-// background goroutines long after the request that created the session is
-// gone), so this is the only thing that can stop one that hangs: the flush
-// timeout above cancels the *wait* for a hung refresh, but the refresh itself
-// would keep a goroutine stuck forever. Keep it at most the flush timeout.
-const cloudTokenRefreshTimeout = 5 * time.Second
-
 func (sess *daggerSession) beginClosing() {
 	sess.closeClosingOnce.Do(func() {
 		if sess.cancelClosing != nil {
@@ -597,7 +575,7 @@ func (srv *Server) removeDaggerSession(ctx context.Context, sess *daggerSession)
 		if srv.isShuttingDown() {
 			return
 		}
-		time.AfterFunc(time.Second, srv.throttledGC)
+		time.AfterFunc(time.Second, srv.throttledSessionGC)
 	}()
 
 	var errs error
@@ -680,18 +658,6 @@ func (srv *Server) removeDaggerSession(ctx context.Context, sess *daggerSession)
 	}
 	errs = errors.Join(errs, releaseGroup.Wait())
 
-	// the per-client providers above only flush into the session-owned cloud
-	// exporters; the session shuts them down, once, here
-	if sess.cloudSpans != nil {
-		errs = errors.Join(errs, sess.cloudSpans.Shutdown(ctx))
-	}
-	if sess.cloudLogs != nil {
-		errs = errors.Join(errs, sess.cloudLogs.Shutdown(ctx))
-	}
-	if sess.cloudMetrics != nil {
-		errs = errors.Join(errs, sess.cloudMetrics.Shutdown(ctx))
-	}
-
 	// cleanup analytics and telemetry
 	errs = errors.Join(errs, sess.analytics.Close())
 
@@ -735,6 +701,7 @@ func (srv *Server) removeDaggerSession(ctx context.Context, sess *daggerSession)
 // teardown can't delete a freshly created same-id session. Call only after the
 // session's teardown is complete and lifecycleMu has been released.
 func (srv *Server) deleteSession(sess *daggerSession) {
+	srv.engineUtilOpts.ClearSessionParallelism(sess.sessionID)
 	srv.daggerSessionsMu.Lock()
 	if srv.daggerSessions[sess.sessionID] == sess {
 		delete(srv.daggerSessions, sess.sessionID)
@@ -817,9 +784,6 @@ type ClientInitOpts struct {
 
 	// If the client is running from a function in a module, this is that function call.
 	FunctionCall *core.FunctionCall
-
-	// If the client is executing in an Env context, this is that Env.
-	EnvContext dagql.ObjectResult[*core.Env]
 }
 
 // requires that client.stateMu is held
@@ -913,23 +877,6 @@ func (srv *Server) initializeDaggerClient(
 	client.defaultDeps = core.NewSchemaBuilder(client.dagqlRoot, []core.Mod{coreMod})
 	client.servedMods = core.NewSchemaBuilder(client.dagqlRoot, []core.Mod{coreMod})
 
-	if opts.EnvContext.Self() != nil {
-		cache, err := dagql.EngineCache(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get engine cache for env context: %w", err)
-		}
-
-		attached, err := cache.AttachResult(ctx, opts.SessionID, client.dag, opts.EnvContext)
-		if err != nil {
-			return fmt.Errorf("attach env context during client init: %w", err)
-		}
-		envInst, ok := attached.(dagql.ObjectResult[*core.Env])
-		if !ok {
-			return fmt.Errorf("attach env context during client init: expected %T, got %T", opts.EnvContext, attached)
-		}
-		client.env = envInst
-	}
-
 	if opts.ModuleContext.Self() != nil {
 		cache, err := dagql.EngineCache(ctx)
 		if err != nil {
@@ -962,30 +909,6 @@ func (srv *Server) initializeDaggerClient(
 		client.pendingWorkspaceLoad = true
 		if clientMD := client.clientMetadata; clientMD != nil && len(clientMD.ExtraModules) > 0 {
 			client.pendingExtraModules = clientMD.ExtraModules
-		}
-	}
-
-	// Export telemetry to Dagger Cloud if the session's main client has cloud
-	// auth. The exporters are created once, from the main client's identity,
-	// and shared by every client in the session so that telemetry from nested
-	// clients (module runtimes, privileged execs, services) reaches Cloud too.
-	// Nested clients always initialize after the main client (every init runs
-	// under sess.stateMu in getOrInitClient), so the exporters exist by the
-	// time they attach below.
-	sess := client.daggerSession
-	if md := client.clientMetadata; client.clientID == sess.mainClientCallerID && md.CloudAuth != nil {
-		// OTel invokes exporters from background goroutines whose contexts
-		// carry no Dagger session state, so capture everything token refresh
-		// needs (the main client's metadata and query) at creation time.
-		refreshCtx := cloudRefreshContext(ctx, client)
-		tokenRefresh := func(context.Context) (*oauth2.Token, error) {
-			refreshCtx, cancel := context.WithTimeout(refreshCtx, cloudTokenRefreshTimeout)
-			defer cancel()
-			return refreshAndPersistCredentials(refreshCtx, srv, md.CredentialsPath, md.ClientID)
-		}
-		sess.cloudSpans, sess.cloudLogs, sess.cloudMetrics, err = enginetel.NewCloudExporters(ctx, md.CloudAuth, tokenRefresh, md.CloudURL)
-		if err != nil {
-			slog.Warn("failed to configure cloud exporters for session", "error", err)
 		}
 	}
 
@@ -1032,12 +955,6 @@ func (srv *Server) initializeDaggerClient(
 		)),
 	}
 
-	if sess.cloudSpans != nil {
-		tracerOpts = append(tracerOpts, sdktrace.WithSpanProcessor(telemetry.NewLiveSpanProcessor(
-			enginetel.SharedSpanExporter{SpanExporter: sess.cloudSpans},
-		)))
-	}
-
 	logs := srv.telemetryPubSub.Logs(client)
 	client.logExporter = logs
 	loggerOpts := []sdklog.LoggerProviderOption{
@@ -1049,15 +966,6 @@ func (srv *Server) initializeDaggerClient(
 		sdklog.WithProcessor(enginetel.NewLogBatchProcessor(logs)),
 	}
 
-	if sess.cloudLogs != nil {
-		loggerOpts = append(loggerOpts, sdklog.WithProcessor(
-			sdklog.NewBatchProcessor(
-				enginetel.SharedLogExporter{Exporter: sess.cloudLogs},
-				sdklog.WithExportInterval(telemetry.NearlyImmediate),
-			),
-		))
-	}
-
 	const metricReaderInterval = 5 * time.Second
 
 	client.metricExporter = srv.telemetryPubSub.Metrics(client)
@@ -1067,15 +975,6 @@ func (srv *Server) initializeDaggerClient(
 			client.metricExporter,
 			sdkmetric.WithInterval(metricReaderInterval),
 		)),
-	}
-
-	if sess.cloudMetrics != nil {
-		meterOpts = append(meterOpts, sdkmetric.WithReader(
-			sdkmetric.NewPeriodicReader(
-				enginetel.SharedMetricExporter{Exporter: sess.cloudMetrics},
-				sdkmetric.WithInterval(metricReaderInterval),
-			)),
-		)
 	}
 
 	// export to parent client DBs too (same large-queue live BSP — nested-client
@@ -1094,8 +993,8 @@ func (srv *Server) initializeDaggerClient(
 			sdkmetric.NewPeriodicReader(
 				srv.telemetryPubSub.Metrics(parent),
 				sdkmetric.WithInterval(metricReaderInterval),
-			)),
-		)
+			),
+		))
 	}
 	client.tracerProvider = sdktrace.NewTracerProvider(tracerOpts...)
 	client.loggerProvider = sdklog.NewLoggerProvider(loggerOpts...)
@@ -1128,62 +1027,6 @@ func (client *daggerClient) resolveHostServiceCaller(
 	}
 
 	return client.getClientCaller(ctx, id)
-}
-
-// cloudRefreshContext returns the context the cloud exporters' token refresh
-// runs on: the client's query and metadata captured at exporter creation,
-// decoupled from the request's cancellation.
-func cloudRefreshContext(ctx context.Context, client *daggerClient) context.Context {
-	return core.ContextWithQuery(
-		engine.ContextWithClientMetadata(context.WithoutCancel(ctx), client.clientMetadata),
-		client.dagqlRoot,
-	)
-}
-
-// refreshAndPersistCredentials refreshes an expired OAuth token by reading the
-// credentials file from the client's host, and writes the refreshed token back
-// (refreshing invalidates the old one). It is called from OTel exporter
-// goroutines, so ctx must be the context captured when the exporters were
-// created, not the export context.
-func refreshAndPersistCredentials(ctx context.Context, srv *Server, credentialsPath, sourceClientID string) (*oauth2.Token, error) {
-	if credentialsPath == "" || sourceClientID == "" {
-		return nil, fmt.Errorf("no credentials path or client id available")
-	}
-
-	tokenData, err := (&core.Secret{
-		URIVal:         "file://" + credentialsPath,
-		SourceClientID: sourceClientID,
-	}).Plaintext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get secret: %w", err)
-	}
-	var token oauth2.Token
-	if err := json.Unmarshal(tokenData, &token); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-
-	ts, err := cloudauth.TokenSource(ctx, &token)
-	if err != nil {
-		return nil, fmt.Errorf("get token source: %w", err)
-	}
-	newToken, err := ts.Token()
-	if err != nil {
-		return nil, fmt.Errorf("get new token: %w", err)
-	}
-	bt, err := json.Marshal(newToken)
-	if err != nil {
-		return nil, fmt.Errorf("marshal token: %w", err)
-	}
-
-	engine, err := srv.Engine(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get buildkit client: %w", err)
-	}
-	if err := engine.IOReaderExport(ctx, bytes.NewReader(bt), credentialsPath, 0o600); err != nil {
-		return nil, fmt.Errorf("write config: %w", err)
-	}
-	slog.Info("refreshed cloud credentials", "credentialsPath", credentialsPath)
-	return newToken, nil
 }
 
 func (srv *Server) clientFromContext(ctx context.Context) (*daggerClient, error) {
@@ -1469,15 +1312,14 @@ func (srv *Server) getOrInitClient(
 				client.clientMetadata.WorkspaceEnv = &env
 			}
 		}
+		if client.clientMetadata.UserConfigPath == "" && !client.workspaceLoaded {
+			client.clientMetadata.UserConfigPath = opts.ClientMetadata.UserConfigPath
+		}
 		// ExtraModules may arrive on a later request (e.g. /init) after the
 		// session attachable request already created the client without them.
 		if len(opts.ExtraModules) > 0 && len(client.pendingExtraModules) == 0 && !client.extraModulesLoaded {
 			client.clientMetadata.ExtraModules = opts.ExtraModules
 			client.pendingExtraModules = opts.ExtraModules
-		}
-
-		if client.clientMetadata.CredentialsPath == "" && opts.ClientMetadata.CredentialsPath != "" {
-			client.clientMetadata.CredentialsPath = opts.ClientMetadata.CredentialsPath
 		}
 	}
 
@@ -1596,7 +1438,6 @@ func (srv *Server) ServeHTTPToNestedClient(
 	hostServiceProxyToCaller bool,
 	moduleCtx dagql.AnyObjectResult,
 	functionCall dagql.Typed,
-	envCtx dagql.AnyObjectResult,
 ) {
 	if nestedClientMetadata == nil {
 		http.Error(w, "nested client metadata is nil", http.StatusInternalServerError)
@@ -1626,18 +1467,6 @@ func (srv *Server) ServeHTTPToNestedClient(
 		fnCall = typed
 	}
 
-	var envContext dagql.ObjectResult[*core.Env]
-	if envCtx != nil {
-		typed, ok := envCtx.(dagql.ObjectResult[*core.Env])
-		if !ok {
-			http.Error(w, fmt.Sprintf("nested client env context is %T, not Env", envCtx), http.StatusInternalServerError)
-			return
-		}
-		if typed.Self() != nil {
-			envContext = typed
-		}
-	}
-
 	var hostServiceProxyClientID string
 	if hostServiceProxyToCaller {
 		hostServiceProxyClientID = callerClientID
@@ -1649,7 +1478,6 @@ func (srv *Server) ServeHTTPToNestedClient(
 		HostServiceProxyClientID: hostServiceProxyClientID,
 		ModuleContext:            moduleContext,
 		FunctionCall:             fnCall,
-		EnvContext:               envContext,
 	}).ServeHTTP(w, r)
 }
 
@@ -1669,7 +1497,7 @@ func nestedClientMetadataForRequest(h http.Header, nestedClientMetadata *engine.
 	var suppressCompatWorkspaceWarning bool
 	var workspaceRef *string
 	var workspaceEnv *string
-	credentialsPath := clientMetadata.CredentialsPath
+	var userConfigPath string
 	if md, _ := engine.ClientMetadataFromHTTPHeaders(h); md != nil {
 		clientMetadata.ClientVersion = md.ClientVersion
 		clientMetadata.AllowedLLMModules = slices.Clone(md.AllowedLLMModules)
@@ -1682,7 +1510,6 @@ func nestedClientMetadataForRequest(h http.Header, nestedClientMetadata *engine.
 		workspaceModuleScope = md.WorkspaceModuleScope
 		eagerRuntime = md.EagerRuntime
 		suppressCompatWorkspaceWarning = md.SuppressCompatWorkspaceWarning
-		credentialsPath = md.CredentialsPath
 		if declaredWorkspace, ok := workspaceRefFromClientMetadata(md); ok {
 			ref := declaredWorkspace
 			workspaceRef = &ref
@@ -1694,6 +1521,7 @@ func nestedClientMetadataForRequest(h http.Header, nestedClientMetadata *engine.
 			env := declaredEnv
 			workspaceEnv = &env
 		}
+		userConfigPath = md.UserConfigPath
 	}
 
 	clientMetadata.ExtraModules = extraModules
@@ -1704,7 +1532,7 @@ func nestedClientMetadataForRequest(h http.Header, nestedClientMetadata *engine.
 	clientMetadata.SuppressCompatWorkspaceWarning = suppressCompatWorkspaceWarning
 	clientMetadata.Workspace = workspaceRef
 	clientMetadata.WorkspaceEnv = workspaceEnv
-	clientMetadata.CredentialsPath = credentialsPath
+	clientMetadata.UserConfigPath = userConfigPath
 	return &clientMetadata
 }
 
@@ -2081,7 +1909,7 @@ func (srv *Server) ensureRequestModulesLoadedWithPostLoad(ctx context.Context, c
 				// runs under client.modulesMu, which also guards
 				// servedWorkspaceModuleNames and workspaceModuleScopeConsumed
 				scope := client.pendingWorkspaceModuleScopeLocked()
-				selected, applied := filterPendingWorkspaceModulesForScopedRootFields(mods, client.servedWorkspaceModuleNames, rootFields, scope, client.entrypointServed)
+				selected, applied := filterPendingWorkspaceModulesForScopedRootFields(mods, client.servedWorkspaceModuleNames, client.failedModules, rootFields, scope, client.entrypointServed)
 				if applied {
 					scopeApplied = true
 					names := make([]string, 0, len(selected))
@@ -2179,6 +2007,9 @@ func (srv *Server) serveShutdown(w http.ResponseWriter, r *http.Request, client 
 			slog.Error("failed to flush workspace locks", "error", err)
 		}
 
+		// this must be done after lockfile flushing (since lockfiles make use of attachables to write data to host)
+		sess.beginClosing()
+
 		// Stop services, since the main client is going away, and we
 		// want the client to see them stop. Stop errors are not surfaced
 		// (matching prior behavior), so the phase always returns nil.
@@ -2213,31 +2044,20 @@ func (srv *Server) serveShutdown(w http.ResponseWriter, r *http.Request, client 
 	// flushes, multiplying exporter work and spill pressure enough to blow the
 	// client's shutdown budget. The main client (which shuts down last and whose
 	// DB the CLI ultimately drains) still does a session-wide flush to sweep up any
-	// stragglers from clients that hadn't shut down yet. This must happen before
-	// beginClosing below: the cloud exporters may need to refresh OAuth credentials
-	// from the client host, which requires the session attachables that beginClosing
-	// tears down. Bound the flush and keep it best-effort: a Cloud outage may lose
-	// telemetry, but must not fail an otherwise successful command.
-	flushCtx, flushCancel := context.WithTimeout(ctx, sessionTelemetryFlushTimeout)
+	// stragglers from clients that hadn't shut down yet.
 	var flushErr error
 	if client.clientID == sess.mainClientCallerID {
 		flushErr = drainPhase("flush session telemetry", func() error {
-			return sess.FlushTelemetry(flushCtx, "main client shutdown")
+			return sess.FlushTelemetry(ctx, "main client shutdown")
 		})
 	} else {
 		flushErr = drainPhase("flush client telemetry", func() error {
-			return client.FlushTelemetry(flushCtx)
+			return client.FlushTelemetry(ctx)
 		})
 	}
-	flushCancel()
 	if flushErr != nil {
 		slog.Error("failed to flush telemetry", "error", flushErr)
-	}
-
-	if client.clientID == sess.mainClientCallerID {
-		// This must be done after lockfile and telemetry flushing, since both
-		// can use attachables to write data back to the client host.
-		sess.beginClosing()
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("flush telemetry: %w", flushErr))
 	}
 
 	client.closeShutdownOnce.Do(func() {
@@ -2508,8 +2328,7 @@ func workspaceLockPath(ws *core.Workspace) (string, error) {
 
 func readWorkspaceLockState(ctx context.Context, bk interface {
 	ReadCallerHostFile(ctx context.Context, path string) ([]byte, error)
-}, ws *core.Workspace,
-) (*workspace.Lock, error) {
+}, ws *core.Workspace) (*workspace.Lock, error) {
 	lockPath, err := workspaceLockPath(ws)
 	if err != nil {
 		return nil, err
@@ -2759,14 +2578,6 @@ func (srv *Server) CurrentFunctionCall(ctx context.Context) (*core.FunctionCall,
 		return nil, fmt.Errorf("%w: main client caller has no current module", core.ErrNoCurrentModule)
 	}
 	return client.fnCall, nil
-}
-
-func (srv *Server) CurrentEnv(ctx context.Context) (dagql.ObjectResult[*core.Env], error) {
-	client, err := srv.clientFromContext(ctx)
-	if err != nil {
-		return dagql.ObjectResult[*core.Env]{}, err
-	}
-	return client.env, nil
 }
 
 // Return the modules being served to the current client
@@ -3083,6 +2894,13 @@ func (srv *Server) CloudEngineClient(
 // and leak them.
 func (srv *Server) CleanMountNS() *os.File {
 	return srv.cleanMntNS
+}
+
+func (srv *Server) EngineVolumeState() core.EngineVolumeState {
+	return core.EngineVolumeState{
+		RootDir:                    srv.rootDir,
+		RecursiveReadOnlySupported: srv.recursiveReadOnlyMounts,
+	}
 }
 
 type httpError struct {

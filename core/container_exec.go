@@ -673,7 +673,7 @@ func prepareMounts(
 
 		if state.Volume != nil {
 			var err error
-			mountable, err = prepareExecVolumeMount(state.Volume)
+			mountable, err = prepareExecVolumeMount(ctx, state.Volume)
 			if err != nil {
 				return err
 			}
@@ -1484,7 +1484,7 @@ func (state *ContainerExecState) Evaluate(ctx context.Context, container *Contai
 			}
 
 			if state.Volume != nil {
-				mountable, err = prepareExecVolumeMount(state.Volume)
+				mountable, err = prepareExecVolumeMount(ctx, state.Volume)
 				if err != nil {
 					return err
 				}
@@ -2146,16 +2146,24 @@ func (state *ContainerExecState) Evaluate(ctx context.Context, container *Contai
 		if opts.Stdin != "" {
 			procInfo.Stdin = io.NopCloser(strings.NewReader(opts.Stdin))
 		}
-		// Env is runtime/session context, so keep it off persisted exec state.
-		var envContext dagql.ObjectResult[*Env]
-		if state.FunctionCall != nil {
-			env, ok, err := EnvFromContext(ctx)
+
+		// Bound concurrency: the engine-global cap (engine.json) then this
+		// session's cap (dagger.toml). Acquired last, after all deps are
+		// satisfied, and always global-before-session so they can't deadlock;
+		// skip nested execs, which must not hold a slot while waiting on nested
+		// work.
+		if nestedClientMetadata == nil && (execMD == nil || !execMD.Internal) {
+			releaseEngineSlot, err := engineClient.AcquireEngineSlot(execCtx)
 			if err != nil {
-				return fmt.Errorf("resolve exec env context: %w", err)
+				return err
 			}
-			if ok {
-				envContext = env
+			defer releaseEngineSlot()
+
+			releaseSessionSlot, err := engineClient.AcquireSessionSlot(execCtx, clientMetadata.SessionID)
+			if err != nil {
+				return err
 			}
+			defer releaseSessionSlot()
 		}
 
 		execErrCh := make(chan error, 1)
@@ -2174,7 +2182,6 @@ func (state *ContainerExecState) Evaluate(ctx context.Context, container *Contai
 				nestedClientMetadata,
 				state.ModuleContext,
 				state.FunctionCall,
-				envContext,
 			)
 		}()
 

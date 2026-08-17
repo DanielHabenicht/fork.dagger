@@ -44,12 +44,11 @@ func testResultCall(field string, typ dagql.Typed, receiver *dagql.ResultCall) *
 type mockServer struct {
 	moduleSource   *ModuleSource
 	functionCall   *FunctionCall
-	env            dagql.ObjectResult[*Env]
 	clientMetadata *engine.ClientMetadata
 	attachables    map[string]*grpc.ClientConn
 }
 
-func (ms *mockServer) ServeHTTPToNestedClient(http.ResponseWriter, *http.Request, *engine.ClientMetadata, string, bool, dagql.AnyObjectResult, dagql.Typed, dagql.AnyObjectResult) {
+func (ms *mockServer) ServeHTTPToNestedClient(http.ResponseWriter, *http.Request, *engine.ClientMetadata, string, bool, dagql.AnyObjectResult, dagql.Typed) {
 }
 
 func (ms *mockServer) ServeModule(ctx context.Context, mod dagql.ObjectResult[*Module], includeDependencies bool, entrypoint bool) error {
@@ -104,10 +103,6 @@ func (ms *mockServer) ModuleParent(context.Context) (dagql.ObjectResult[*Module]
 
 func (ms *mockServer) CurrentFunctionCall(context.Context) (*FunctionCall, error) {
 	return ms.functionCall, nil
-}
-
-func (ms *mockServer) CurrentEnv(context.Context) (dagql.ObjectResult[*Env], error) {
-	return ms.env, nil
 }
 
 func (ms *mockServer) CurrentServedDeps(context.Context) (*SchemaBuilder, error) {
@@ -182,6 +177,7 @@ func (ms *mockServer) EngineLocalCachePolicy() *dagql.CachePrunePolicy { return 
 func (ms *mockServer) SnapshotManager() bkcache.SnapshotManager        { return nil }
 func (ms *mockServer) Locker() *locker.Locker                          { return nil }
 func (ms *mockServer) SecretSalt() []byte                              { return nil }
+func (ms *mockServer) EngineVolumeState() EngineVolumeState            { return EngineVolumeState{} }
 func (ms *mockServer) FlushSessionTelemetry(context.Context) error     { return nil }
 func (ms *mockServer) SessionScopedContext(ctx context.Context) (context.Context, error) {
 	return context.WithoutCancel(ctx), nil

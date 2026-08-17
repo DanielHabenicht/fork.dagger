@@ -11,7 +11,6 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -229,16 +228,7 @@ head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1 > /work/random.txt
 			return random
 		}
 
-		// Killing the engine makes this client's CLI session exit asynchronously.
-		// Keep its final log drain independent from the lifetime of testing.T.
-		upstreamSvcA, engineSvcA, engineClientA := startEngineWithClientOpts(
-			c,
-			ctx,
-			t,
-			stateKey,
-			[]dagger.ClientOpt{dagger.WithLogOutput(io.Discard)},
-			engineWithPersistenceTestGC(ctx, t),
-		)
+		upstreamSvcA, engineSvcA, engineClientA := startEngine(c, ctx, t, stateKey, engineWithPersistenceTestGC(ctx, t))
 		t.Cleanup(func() { stopEngine(ctx, t, upstreamSvcA, engineSvcA, engineClientA) })
 
 		randomA := runRandom(ctx, t, engineClientA)
@@ -966,7 +956,7 @@ head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1 > /work/random.txt
 
 			repo := engineClient.Host().Directory(repoDir).AsGit()
 			ref := repo.Head()
-			commitFromRef, err := ref.Commit(ctx)
+			commitFromRef, err := ref.CommitSHA(ctx)
 			require.NoError(t, err)
 
 			ctr := engineClient.
@@ -1118,9 +1108,9 @@ printf 'layered\n' > /work/layered.txt
 				ctr = ctr.WithExec([]string{
 					"sh",
 					"-ec",
-					`test -f /app/toolchains/engine-dev/build/builder.go
-sed -i 's/var versionAnnotation = distconsts.OCIVersionAnnotation/var versionAnnotation = distconsts.OCIVersionAnnotation + "-test"/' /app/toolchains/engine-dev/build/builder.go
-grep -q 'var versionAnnotation = distconsts.OCIVersionAnnotation + "-test"' /app/toolchains/engine-dev/build/builder.go`,
+					`test -f /app/.dagger/modules/engine-dev/build/builder.go
+sed -i 's/var versionAnnotation = distconsts.OCIVersionAnnotation/var versionAnnotation = distconsts.OCIVersionAnnotation + "-test"/' /app/.dagger/modules/engine-dev/build/builder.go
+grep -q 'var versionAnnotation = distconsts.OCIVersionAnnotation + "-test"' /app/.dagger/modules/engine-dev/build/builder.go`,
 				})
 			}
 

@@ -20,7 +20,7 @@ dagger [options] [subcommand | file...]
   -c, --command string               Execute a dagger shell command
   -d, --debug                        Show debug logs and full verbosity
       --eager-runtime                load module runtime eagerly
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
   -m, --load-module string           Use a one-off module (local path or git ref)
@@ -41,6 +41,7 @@ dagger [options] [subcommand | file...]
 ### SEE ALSO
 
 * [dagger activity](#dagger-activity)	 - Show recent activity (runs, traces, etc.) for this workspace
+* [dagger agent](#dagger-agent)	 - Compose your installed agent modules and drop into an interactive prompt.
 * [dagger api](#dagger-api)	 - Interact with the Dagger API (advanced)
 * [dagger check](#dagger-check)	 - Verify your project — tests, linters, type checks, security scans, etc.
 * [dagger cloud](#dagger-cloud)	 - Manage Dagger Cloud
@@ -78,7 +79,62 @@ dagger activity
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
+  -i, --interactive                  Spawn a terminal on container exec failure
+      --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
+      --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
+  -E, --no-exit                      Leave the TUI running after completion
+      --org string                   Dagger Cloud org name for Cloud-scoped commands
+      --progress string              Progress output format (auto, plain, tty, dots, logs, report) (default "auto")
+  -q, --quiet count                  Reduce verbosity (show progress, but clean up at the end)
+  -s, --silent                       Do not show progress at all
+  -v, --verbose count                Increase verbosity (use -vv or -vvv for more)
+  -w, --web                          Open trace URL in a web browser
+  -W, --workspace string             Select the workspace location to load from (local path or git ref)
+      --x-release string             Run an experimental release from a Dagger git ref
+```
+
+### SEE ALSO
+
+* [dagger](#dagger)	 - A tool to run composable workflows in containers
+
+## dagger agent
+
+Compose your installed agent modules and drop into an interactive prompt.
+
+### Synopsis
+
+Compose your installed agent modules — their tools and system prompts — onto a base LLM, and drop into the interactive prompt with them all live.
+
+Each installed module that exposes an @agent function contributes its toolset and
+system prompt. With no arguments, every installed agent is composed, in
+alphabetical order. Name one or more agents to compose only those.
+
+Examples:
+  dagger agent                    # Compose all installed agents and start the prompt
+  dagger agent -l                 # List all available agents
+  dagger agent editor dagger-go   # Compose only the 'editor' and 'dagger-go' agents
+  dagger agent -r                 # Resume a saved session (interactive picker)
+  dagger agent -r=&lt;session&gt;       # Resume a specific saved session
+
+
+```
+dagger agent [options] [name...]
+```
+
+### Options
+
+```
+  -l, --list                      List available agents
+  -r, --resume session[=picker]   Resume a saved session (interactive picker if no id given)
+```
+
+### Options inherited from parent commands
+
+```
+  -y, --auto-apply                   Automatically apply changes when a changeset is returned
+  -d, --debug                        Show debug logs and full verbosity
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -116,7 +172,7 @@ See https://docs.dagger.io/api for the full overview.
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -136,9 +192,9 @@ See https://docs.dagger.io/api for the full overview.
 * [dagger](#dagger)	 - A tool to run composable workflows in containers
 * [dagger api call](#dagger-api-call)	 - Call one or more functions, interconnected into a pipeline
 * [dagger api client](#dagger-api-client)	 - Manage generated API clients
-* [dagger api exec](#dagger-api-exec)	 - Run a command with a connected Dagger API session (DAGGER_SESSION_PORT/TOKEN injected)
 * [dagger api functions](#dagger-api-functions)	 - List available functions
 * [dagger api query](#dagger-api-query)	 - Send API queries to a dagger engine
+* [dagger api with-session](#dagger-api-with-session)	 - Run a command with a connected Dagger API session (DAGGER_SESSION_PORT/TOKEN injected)
 
 ## dagger api call
 
@@ -164,7 +220,7 @@ dagger api call [options] [function]...
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -200,7 +256,7 @@ module that generates it.
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -237,6 +293,9 @@ SDK, plans the generated files and workspace config change, then returns a
 Changeset that the CLI previews and applies through the standard preview/apply
 flow.
 
+The SDK's generators run scoped to &lt;path&gt;, so the client's bindings come with
+it. Pass --no-generate to record and scaffold the client without them.
+
 ```
 dagger api client init <sdk> <path> <module>
 ```
@@ -247,12 +306,18 @@ dagger api client init <sdk> <path> <module>
 dagger api client init typescript ./lib/cli .dagger/modules/api
 ```
 
+### Options
+
+```
+      --no-generate   Skip running the SDK's generators for the new client
+```
+
 ### Options inherited from parent commands
 
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -290,7 +355,7 @@ dagger api client list
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -308,71 +373,6 @@ dagger api client list
 ### SEE ALSO
 
 * [dagger api client](#dagger-api-client)	 - Manage generated API clients
-
-## dagger api exec
-
-Run a command with a connected Dagger API session (DAGGER_SESSION_PORT/TOKEN injected)
-
-### Synopsis
-
-Run an external command with a live Dagger API session attached.
-
-`DAGGER_SESSION_PORT` and `DAGGER_SESSION_TOKEN` are injected into the
-command's environment so the command can talk to the engine directly.
-Progress is rendered live in the TUI.
-
-For example:
-```shell
-jq -n '{query:"{container{id}}"}' | \
-  dagger api exec sh -c 'curl -s \
-    -u $DAGGER_SESSION_TOKEN: \
-    -H "content-type:application/json" \
-    -d @- \
-    http://127.0.0.1:$DAGGER_SESSION_PORT/query'
-```
-
-```
-dagger api exec [options] <command>...
-```
-
-### Examples
-
-```
-dagger api exec go run main.go
-dagger api exec node index.mjs
-dagger api exec python main.py
-```
-
-### Options
-
-```
-      --cleanup-timeout duration   max duration to wait between SIGTERM and SIGKILL on interrupt (default 10s)
-      --focus                      Only show output for focused commands.
-```
-
-### Options inherited from parent commands
-
-```
-  -y, --auto-apply                   Automatically apply changes when a changeset is returned
-  -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
-  -i, --interactive                  Spawn a terminal on container exec failure
-      --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
-      --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
-  -E, --no-exit                      Leave the TUI running after completion
-      --org string                   Dagger Cloud org name for Cloud-scoped commands
-      --progress string              Progress output format (auto, plain, tty, dots, logs, report) (default "auto")
-  -q, --quiet count                  Reduce verbosity (show progress, but clean up at the end)
-  -s, --silent                       Do not show progress at all
-  -v, --verbose count                Increase verbosity (use -vv or -vvv for more)
-  -w, --web                          Open trace URL in a web browser
-  -W, --workspace string             Select the workspace location to load from (local path or git ref)
-      --x-release string             Run an experimental release from a Dagger git ref
-```
-
-### SEE ALSO
-
-* [dagger api](#dagger-api)	 - Interact with the Dagger API (advanced)
 
 ## dagger api functions
 
@@ -410,7 +410,7 @@ dagger api functions [options] [function]...
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -481,7 +481,72 @@ EOF
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
+  -i, --interactive                  Spawn a terminal on container exec failure
+      --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
+      --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
+  -E, --no-exit                      Leave the TUI running after completion
+      --org string                   Dagger Cloud org name for Cloud-scoped commands
+      --progress string              Progress output format (auto, plain, tty, dots, logs, report) (default "auto")
+  -q, --quiet count                  Reduce verbosity (show progress, but clean up at the end)
+  -s, --silent                       Do not show progress at all
+  -v, --verbose count                Increase verbosity (use -vv or -vvv for more)
+  -w, --web                          Open trace URL in a web browser
+  -W, --workspace string             Select the workspace location to load from (local path or git ref)
+      --x-release string             Run an experimental release from a Dagger git ref
+```
+
+### SEE ALSO
+
+* [dagger api](#dagger-api)	 - Interact with the Dagger API (advanced)
+
+## dagger api with-session
+
+Run a command with a connected Dagger API session (DAGGER_SESSION_PORT/TOKEN injected)
+
+### Synopsis
+
+Run an external command with a live Dagger API session attached.
+
+`DAGGER_SESSION_PORT` and `DAGGER_SESSION_TOKEN` are injected into the
+command's environment so the command can talk to the engine directly.
+Progress is rendered live in the TUI.
+
+For example:
+```shell
+jq -n '{query:"{container{id}}"}' | \
+  dagger api with-session sh -c 'curl -s \
+    -u $DAGGER_SESSION_TOKEN: \
+    -H "content-type:application/json" \
+    -d @- \
+    http://127.0.0.1:$DAGGER_SESSION_PORT/query'
+```
+
+```
+dagger api with-session [options] <command>...
+```
+
+### Examples
+
+```
+dagger api with-session go run main.go
+dagger api with-session node index.mjs
+dagger api with-session python main.py
+```
+
+### Options
+
+```
+      --cleanup-timeout duration   max duration to wait between SIGTERM and SIGKILL on interrupt (default 10s)
+      --focus                      Only show output for focused commands.
+```
+
+### Options inherited from parent commands
+
+```
+  -y, --auto-apply                   Automatically apply changes when a changeset is returned
+  -d, --debug                        Show debug logs and full verbosity
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -538,7 +603,7 @@ dagger check [options] [pattern...]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -566,7 +631,7 @@ Manage Dagger Cloud
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -612,7 +677,7 @@ dagger cloud billing
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -652,7 +717,7 @@ dagger cloud billing manage [org]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -685,7 +750,7 @@ dagger cloud billing plans
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -718,7 +783,7 @@ dagger cloud check
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -760,7 +825,7 @@ dagger cloud check list [version]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -792,7 +857,7 @@ dagger cloud check off [name]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -824,7 +889,7 @@ dagger cloud check on [name]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -856,7 +921,7 @@ dagger cloud check status [name]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -894,7 +959,7 @@ dagger cloud integration
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -941,7 +1006,7 @@ dagger cloud integration create github
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -974,7 +1039,7 @@ dagger cloud integration list [type]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -1007,7 +1072,7 @@ dagger cloud integration rm <id>
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -1046,7 +1111,7 @@ dagger cloud login [options] [org]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1078,7 +1143,7 @@ dagger cloud logout
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1134,7 +1199,7 @@ dagger cloud logs <trace-id> [--span <id> | --check <name> | --test <name>]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1172,7 +1237,7 @@ dagger cloud org [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1207,7 +1272,7 @@ dagger cloud org info [org] [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -1240,7 +1305,7 @@ dagger cloud org list [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -1273,7 +1338,7 @@ dagger cloud org use <org> [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --json                         Print JSON output
@@ -1335,7 +1400,7 @@ dagger cloud rerun [--check NAME ...] [--failed | --all]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1387,7 +1452,7 @@ dagger generate [options] [pattern...]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1417,6 +1482,9 @@ Install a module into the current workspace.
 If no workspace config is selected, this creates one at the workspace root first.
 Use --here to create the workspace config at the workspace cwd instead.
 
+With --env the module is recorded in that env's overlay (env.&lt;name&gt;.modules.*)
+and the env is created if missing.
+
 ```
 dagger install [options] <module>
 ```
@@ -1439,7 +1507,7 @@ dagger install github.com/shykes/daggerverse/hello@v0.3.0
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1471,7 +1539,7 @@ dagger installed
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1503,7 +1571,7 @@ Manage LLM provider configuration, API keys, and default models.
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1553,7 +1621,7 @@ dagger llm add-key <provider>
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1585,7 +1653,7 @@ dagger llm config
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1617,7 +1685,7 @@ dagger llm remove-key <provider>
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1649,7 +1717,7 @@ dagger llm reset
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1681,7 +1749,7 @@ dagger llm set-default <provider> [model]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1713,7 +1781,7 @@ dagger llm setup
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1745,7 +1813,7 @@ dagger llm show-config
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1779,7 +1847,7 @@ Operates on the dagger-module.toml reachable from the current directory.
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1811,7 +1879,7 @@ Manage this module's dependencies
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1853,7 +1921,7 @@ dagger module deps add github.com/dagger/dagger/modules/wolfi
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1885,7 +1953,7 @@ dagger module deps list [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1923,7 +1991,7 @@ dagger module deps rm wolfi
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1967,7 +2035,7 @@ dagger module deps update wolfi@v0.20.2
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -1995,7 +2063,7 @@ Manage this module's required engine version
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2037,7 +2105,7 @@ dagger module engine require v0.21.0
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2069,7 +2137,7 @@ dagger module engine require-current [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2101,7 +2169,7 @@ dagger module engine require-latest [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2133,7 +2201,7 @@ dagger module engine required [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2163,9 +2231,6 @@ Initialize a new module in the workspace.
 &lt;sdk&gt; is an SDK installed in this workspace. Run `dagger sdk install <sdk>`
 to add more choices.
 
-For example, after `dagger sdk install go`, run
-`dagger module init go myapp`.
-
 The CLI is a thin wrapper around the engine's Workspace.withInitModule. The
 engine validates that &lt;sdk&gt; is installed as an SDK in dagger.toml and returns
 an updated workspace that the CLI previews and exports.
@@ -2178,6 +2243,9 @@ What the engine does (atomically, in one Changeset):
      &lt;path&gt;.
   4. When --path is the default (.dagger/modules/&lt;name&gt;), also installs
      the new module as [modules.&lt;name&gt;] so it's callable here.
+  5. Runs the SDK's generators scoped to &lt;path&gt;, so the new module is
+     loadable without a separate 'dagger generate'. Pass --no-generate to
+     skip this.
 
 --path defaults to .dagger/modules/&lt;name&gt;. Custom paths skip the
 [modules.&lt;name&gt;] install (the user is managing workspace layout
@@ -2190,12 +2258,13 @@ dagger module init <sdk> <name> [flags]
 ### Examples
 
 ```
-dagger module init go myapp
+dagger sdk install go && dagger module init go my-module
 ```
 
 ### Options
 
 ```
+      --no-generate   Skip running the SDK's generators for the new module
       --path string   Module path relative to the workspace root (default: .dagger/modules/<name>)
 ```
 
@@ -2204,7 +2273,7 @@ dagger module init go myapp
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2251,7 +2320,7 @@ dagger module sdk <subcommand> [args...] [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2276,22 +2345,15 @@ Install and manage SDKs (the modules that author other modules)
 
 ### Synopsis
 
-Install and manage SDKs.
-
-SDKs are workspace modules whose role is to scaffold/codegen other things:
-new Dagger modules (`dagger module init`) or typed clients against the
-Dagger API (`dagger api client init`). An install becomes an SDK when
-added through this group — `dagger sdk install go` installs
-[modules.dagger-go-sdk] with [modules.dagger-go-sdk.as-sdk] name = "go" so
-`dagger module init go` / `dagger api client init go`
-dispatch through that SDK.
+Install and manage SDKs that can create Dagger modules or generated API clients.
+Use an installed SDK with `dagger module init` or `dagger api client init`.
 
 ### Options inherited from parent commands
 
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2309,51 +2371,10 @@ dispatch through that SDK.
 ### SEE ALSO
 
 * [dagger](#dagger)	 - A tool to run composable workflows in containers
-* [dagger sdk client-options](#dagger-sdk-client-options)	 - Show SDK-specific flags accepted by `dagger api client init <sdk>`
 * [dagger sdk install](#dagger-sdk-install)	 - Install an SDK and mark it
-* [dagger sdk list](#dagger-sdk-list)	 - List installed SDKs
-* [dagger sdk module-options](#dagger-sdk-module-options)	 - Show SDK-specific flags accepted by `dagger module init <sdk>`
+* [dagger sdk installed](#dagger-sdk-installed)	 - List installed SDKs
 * [dagger sdk search](#dagger-sdk-search)	 - Discover SDKs in the SDK registry
 * [dagger sdk uninstall](#dagger-sdk-uninstall)	 - Remove an SDK install
-
-## dagger sdk client-options
-
-Show SDK-specific flags accepted by `dagger api client init <sdk>`
-
-### Synopsis
-
-Print the SDK-specific flags `dagger api client init <sdk>`
-accepts, introspected from the SDK's initClient function.
-
-Requires the SDK to implement the initClient capability.
-
-```
-dagger sdk client-options <sdk> [flags]
-```
-
-### Options inherited from parent commands
-
-```
-  -y, --auto-apply                   Automatically apply changes when a changeset is returned
-  -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
-  -i, --interactive                  Spawn a terminal on container exec failure
-      --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
-      --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
-  -E, --no-exit                      Leave the TUI running after completion
-      --org string                   Dagger Cloud org name for Cloud-scoped commands
-      --progress string              Progress output format (auto, plain, tty, dots, logs, report) (default "auto")
-  -q, --quiet count                  Reduce verbosity (show progress, but clean up at the end)
-  -s, --silent                       Do not show progress at all
-  -v, --verbose count                Increase verbosity (use -vv or -vvv for more)
-  -w, --web                          Open trace URL in a web browser
-  -W, --workspace string             Select the workspace location to load from (local path or git ref)
-      --x-release string             Run an experimental release from a Dagger git ref
-```
-
-### SEE ALSO
-
-* [dagger sdk](#dagger-sdk)	 - Install and manage SDKs (the modules that author other modules)
 
 ## dagger sdk install
 
@@ -2364,13 +2385,10 @@ Install an SDK and mark it
 Install an SDK into the current workspace and mark it with the
 [modules.&lt;name&gt;.as-sdk] table.
 
-Alias resolution: `dagger sdk install go` resolves "go" via the
-embedded sdks.json registry to github.com/dagger/go-sdk. The workspace
-install name is the canonical ref basename prefixed with "dagger-"
-(`dagger-go-sdk`), and the user-facing name is persisted as
-[modules.dagger-go-sdk.as-sdk] name = "go". Direct refs work too:
-`dagger sdk install github.com/foo/sdk` is installed as
-[modules.sdk] by basename.
+Registry names and aliases resolve to their canonical SDK refs. For registry
+SDKs, the workspace install name is the canonical ref basename prefixed with
+"dagger-", and the user-facing name is persisted in
+[modules.&lt;name&gt;.as-sdk] name. Direct refs are installed by basename.
 
 Generic `dagger install <ref>` does NOT mark anything as an SDK.
 The marker is opt-in via this verb.
@@ -2382,7 +2400,7 @@ dagger sdk install [options] <name-or-ref> [flags]
 ### Examples
 
 ```
-dagger sdk install go
+dagger sdk install typescript && dagger module init typescript --help && dagger api client init typescript --help
 ```
 
 ### Options
@@ -2397,7 +2415,7 @@ dagger sdk install go
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2416,7 +2434,7 @@ dagger sdk install go
 
 * [dagger sdk](#dagger-sdk)	 - Install and manage SDKs (the modules that author other modules)
 
-## dagger sdk list
+## dagger sdk installed
 
 List installed SDKs
 
@@ -2425,12 +2443,8 @@ List installed SDKs
 List installs in the current workspace that carry the
 [modules.&lt;name&gt;.as-sdk] marker.
 
-The M and C columns count workspace-local modules and clients authored
-under each SDK (the entries in [[modules.&lt;name&gt;.as-sdk.modules]] and
-[[modules.&lt;name&gt;.as-sdk.clients]]).
-
 ```
-dagger sdk list [flags]
+dagger sdk installed [flags]
 ```
 
 ### Options inherited from parent commands
@@ -2438,46 +2452,7 @@ dagger sdk list [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
-  -i, --interactive                  Spawn a terminal on container exec failure
-      --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
-      --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
-  -E, --no-exit                      Leave the TUI running after completion
-      --org string                   Dagger Cloud org name for Cloud-scoped commands
-      --progress string              Progress output format (auto, plain, tty, dots, logs, report) (default "auto")
-  -q, --quiet count                  Reduce verbosity (show progress, but clean up at the end)
-  -s, --silent                       Do not show progress at all
-  -v, --verbose count                Increase verbosity (use -vv or -vvv for more)
-  -w, --web                          Open trace URL in a web browser
-  -W, --workspace string             Select the workspace location to load from (local path or git ref)
-      --x-release string             Run an experimental release from a Dagger git ref
-```
-
-### SEE ALSO
-
-* [dagger sdk](#dagger-sdk)	 - Install and manage SDKs (the modules that author other modules)
-
-## dagger sdk module-options
-
-Show SDK-specific flags accepted by `dagger module init <sdk>`
-
-### Synopsis
-
-Print the SDK-specific flags `dagger module init <sdk> <name>`
-accepts, introspected from the SDK's initModule function.
-
-Requires the SDK to implement the initModule capability.
-
-```
-dagger sdk module-options <sdk> [flags]
-```
-
-### Options inherited from parent commands
-
-```
-  -y, --auto-apply                   Automatically apply changes when a changeset is returned
-  -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2516,7 +2491,7 @@ dagger sdk search [query] [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2552,12 +2527,6 @@ files are left on disk untouched, only the workspace entries go away.
 dagger sdk uninstall [options] <name> [flags]
 ```
 
-### Examples
-
-```
-dagger sdk uninstall go
-```
-
 ### Options
 
 ```
@@ -2570,7 +2539,7 @@ dagger sdk uninstall go
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2614,7 +2583,7 @@ dagger search wolfi
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2644,8 +2613,9 @@ dagger settings [module] [key] [value...]
 ### Options
 
 ```
-      --here    Write workspace config at the selected workspace cwd
-  -u, --unset   Remove the setting from workspace config
+  -g, --global   Store the setting in user-level config instead of the repository, keyed by the workspace's git remote
+      --here     Write workspace config at the selected workspace cwd
+  -u, --unset    Remove the setting from workspace config
 ```
 
 ### Options inherited from parent commands
@@ -2653,7 +2623,7 @@ dagger settings [module] [key] [value...]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2680,13 +2650,23 @@ Ensure Dagger is properly set up and operational in the workspace
 
 Ensure Dagger is properly set up and operational in the workspace.
 
-Walks through three steps, each prompted independently:
+Starts with a Cloud login prompt, then takes one of two paths:
 
-  1. Cloud login        — authenticate with Dagger Cloud.
-  2. Workspace migrate  — convert any legacy dagger.json projects to
-                          the current workspace format.
-  3. Recommended modules — suggest modules to install based on files
-                           present in the workspace.
+  • Workspace migrate    — if a legacy dagger.json project is detected,
+                           convert it to the current workspace format.
+  • Recommended modules  — otherwise, suggest modules to install based
+                           on files present in the workspace.
+
+Migration and recommendations never run together: after applying a
+migration, run setup again to see recommendations for the migrated
+workspace. Declining the migration falls through to recommendations.
+
+Run from a module subdirectory (a dagger.json below the repository
+root), the migrate step converts just that module to dagger-module.toml:
+no workspace is created and module recommendations are skipped. If that
+config lists toolchains, they are installed into a dagger.toml at the
+repository root — never a nested one. A subdirectory config with a
+blueprint is left as legacy with a warning.
 
 Idempotent: safe to run anytime. No-ops what's already in good shape.
 Each step can be skipped at the prompt. With --auto-apply, all steps
@@ -2702,7 +2682,7 @@ dagger setup
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2729,6 +2709,8 @@ Uninstall a module from your workspace
 
 Uninstall a module from the current workspace, removing it from dagger.toml.
 
+With --env only the env's overlay entry is removed, never the base module.
+
 ```
 dagger uninstall [options] <module>
 ```
@@ -2750,7 +2732,7 @@ dagger uninstall hello
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2798,7 +2780,7 @@ dagger up [options] [pattern...]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2842,7 +2824,7 @@ dagger update
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2881,7 +2863,7 @@ dagger version
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2926,7 +2908,7 @@ dagger workspace
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -2976,8 +2958,9 @@ dagger workspace config [key] [value] [flags]
 ### Options
 
 ```
-      --here    Write workspace config at the selected workspace cwd
-  -u, --unset   Remove the value at the given key
+  -g, --global   Write to user-level config instead of the repository, keyed by the workspace's git remote
+      --here     Write workspace config at the selected workspace cwd
+  -u, --unset    Remove the value at the given key
 ```
 
 ### Options inherited from parent commands
@@ -2985,7 +2968,7 @@ dagger workspace config [key] [value] [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -3017,7 +3000,7 @@ dagger workspace config-file [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -3049,7 +3032,7 @@ dagger workspace cwd [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -3081,7 +3064,7 @@ dagger workspace remote [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -3113,7 +3096,7 @@ dagger workspace remotes [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.
@@ -3145,7 +3128,7 @@ dagger workspace root [flags]
 ```
   -y, --auto-apply                   Automatically apply changes when a changeset is returned
   -d, --debug                        Show debug logs and full verbosity
-      --env string                   Apply the named workspace environment overlay
+      --env string                   Apply a named env overlay; writes target it, creating it if missing
   -i, --interactive                  Spawn a terminal on container exec failure
       --interactive-command string   Change the default command for interactive mode (default "/bin/sh")
       --lock string                  Lock lookup mode (disabled, live, pinned, frozen). Defaults to disabled.

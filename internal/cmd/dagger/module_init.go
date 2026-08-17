@@ -121,7 +121,10 @@ func sdkRegistryRepoBase(repo string) string {
 
 // --- dagger module init ---
 
-var moduleInitPath string
+var (
+	moduleInitPath       string
+	moduleInitNoGenerate bool
+)
 
 var moduleInitCmd = &cobra.Command{
 	Use:   "init <sdk> <name>",
@@ -130,9 +133,6 @@ var moduleInitCmd = &cobra.Command{
 
 <sdk> is an SDK installed in this workspace. Run ` + "`dagger sdk install <sdk>`" + `
 to add more choices.
-
-For example, after ` + "`dagger sdk install go`" + `, run
-` + "`dagger module init go myapp`" + `.
 
 The CLI is a thin wrapper around the engine's Workspace.withInitModule. The
 engine validates that <sdk> is installed as an SDK in dagger.toml and returns
@@ -146,11 +146,14 @@ What the engine does (atomically, in one Changeset):
      <path>.
   4. When --path is the default (.dagger/modules/<name>), also installs
      the new module as [modules.<name>] so it's callable here.
+  5. Runs the SDK's generators scoped to <path>, so the new module is
+     loadable without a separate 'dagger generate'. Pass --no-generate to
+     skip this.
 
 --path defaults to .dagger/modules/<name>. Custom paths skip the
 [modules.<name>] install (the user is managing workspace layout
 explicitly).`,
-	Example: "dagger module init go myapp",
+	Example: "dagger sdk install go && dagger module init go my-module",
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return cmd.Help()
@@ -159,10 +162,14 @@ explicitly).`,
 
 func init() {
 	moduleInitCmd.PersistentFlags().StringVar(&moduleInitPath, "path", "", "Module path relative to the workspace root (default: .dagger/modules/<name>)")
+	moduleInitCmd.PersistentFlags().BoolVar(&moduleInitNoGenerate, "no-generate", false, "Skip running the SDK's generators for the new module")
 	moduleCmd.AddCommand(moduleInitCmd)
 }
 
 func runModuleInitWithSDK(cmd *cobra.Command, sdkName, name string) error {
+	if workspaceEnv != "" {
+		return fmt.Errorf("module init does not support --env; it scaffolds modules into the base workspace config")
+	}
 	return withEngine(cmd.Context(), client.Params{
 		SkipWorkspaceModules:           true,
 		SuppressCompatWorkspaceWarning: true,
@@ -173,13 +180,15 @@ func runModuleInitWithSDK(cmd *cobra.Command, sdkName, name string) error {
 			return err
 		}
 		opts := dagger.WorkspaceWithInitModuleOpts{
-			Path: moduleInitPath,
+			Path:       moduleInitPath,
+			NoGenerate: moduleInitNoGenerate,
 		}
 		if sdkArgs != "" {
 			opts.Args = dagger.JSON(sdkArgs)
 		}
-		updated := dag.CurrentWorkspace().WithInitModule(name, sdkName, opts)
-		_, err = handleWorkspaceResponse(ctx, dag, updated, autoApply)
+		current := dag.CurrentWorkspace()
+		updated := current.WithInitModule(name, sdkName, opts)
+		_, err = handleWorkspaceResponse(ctx, dag, current, updated, autoApply)
 		return err
 	})
 }

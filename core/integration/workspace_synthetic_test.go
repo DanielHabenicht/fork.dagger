@@ -111,7 +111,7 @@ func (WorkspaceSuite) TestGitRefBackedSyntheticWorkspaceUsesSelectedRef(ctx cont
 	require.NoError(t, err)
 
 	loadedRef := dagger.Ref[*dagger.GitRef](c, refID)
-	commit, err := loadedRef.Commit(ctx)
+	commit, err := loadedRef.CommitSHA(ctx)
 	require.NoError(t, err)
 
 	ws := loadedRef.AsWorkspace(dagger.GitRefAsWorkspaceOpts{Cwd: "/app"})
@@ -137,7 +137,7 @@ func (WorkspaceSuite) TestGitRefBackedSyntheticWorkspaceUsesSelectedRef(ctx cont
 	require.NoError(t, err)
 	requireNoEntry(t, unfiltered, "debug.log")
 
-	head, err := ws.Git().Head().Commit(ctx)
+	head, err := ws.Git().Head().CommitSHA(ctx)
 	require.NoError(t, err)
 	require.Equal(t, strings.TrimSpace(commit), strings.TrimSpace(head))
 
@@ -160,7 +160,7 @@ func (WorkspaceSuite) TestGitRefBackedSyntheticWorkspaceRoundTripsFromID(ctx con
 
 	loadedRef := dagger.Ref[*dagger.GitRef](c, refID)
 
-	commit, err := loadedRef.Commit(controlCtx)
+	commit, err := loadedRef.CommitSHA(controlCtx)
 	require.NoError(t, err)
 
 	directMain, err := loadedRef.
@@ -192,7 +192,7 @@ func (WorkspaceSuite) TestGitRefBackedSyntheticWorkspaceRoundTripsFromID(ctx con
 	require.NoError(t, err)
 	require.Equal(t, "root readme", root)
 
-	head, err := loaded.Git().Head().Commit(queryCtx)
+	head, err := loaded.Git().Head().CommitSHA(queryCtx)
 	require.NoError(t, err)
 	require.Equal(t, strings.TrimSpace(commit), strings.TrimSpace(head))
 
@@ -243,6 +243,44 @@ func (WorkspaceSuite) TestOverlayWorkspaceFunctionalWritesDoNotMutateBaseSource(
 	require.NoError(t, err)
 	requireEntry(t, afterBaseEntries, "base.txt")
 	requireNoEntry(t, afterBaseEntries, "new.txt")
+}
+
+// TestOverlayWorkspaceFunctionalRemovesDoNotMutateBaseSource asserts the
+// functional-remove contract mirrors Directory.withoutFile /
+// Directory.withoutDirectory: removing from a Workspace returns an overlay
+// Workspace whose reads reflect the removal, while the base source remains
+// readable and unchanged.
+func (WorkspaceSuite) TestOverlayWorkspaceFunctionalRemovesDoNotMutateBaseSource(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	ws := c.Directory().
+		WithNewFile("app/keep.txt", "keep").
+		WithNewFile("app/drop.txt", "drop").
+		WithNewFile("app/sub/inner.txt", "inner").
+		AsWorkspace(dagger.DirectoryAsWorkspaceOpts{Cwd: "/app"})
+
+	withoutFile := ws.WithoutFile("drop.txt")
+	fileEntries, err := withoutFile.Directory(".").Entries(ctx)
+	require.NoError(t, err)
+	requireEntry(t, fileEntries, "keep.txt")
+	requireNoEntry(t, fileEntries, "drop.txt")
+
+	removed, err := withoutFile.Changes(dagger.WorkspaceChangesOpts{From: ws}).RemovedPaths(ctx)
+	require.NoError(t, err)
+	require.Contains(t, removed, "drop.txt")
+
+	withoutDir := ws.WithoutDirectory("sub")
+	dirEntries, err := withoutDir.Directory(".").Entries(ctx)
+	require.NoError(t, err)
+	requireEntry(t, dirEntries, "keep.txt")
+	requireNoEntry(t, dirEntries, "sub")
+
+	// The base source is untouched by either removal.
+	baseEntries, err := ws.Directory(".").Entries(ctx)
+	require.NoError(t, err)
+	requireEntry(t, baseEntries, "keep.txt")
+	requireEntry(t, baseEntries, "drop.txt")
+	requireEntry(t, baseEntries, "sub")
 }
 
 // TestOverlayWorkspaceFunctionalWritesRoundTripFromID asserts that each
@@ -317,13 +355,13 @@ func (WorkspaceSuite) TestOverlayGitRefWorkspaceReportsOverlayAsUncommitted(ctx 
 	require.NoError(t, err)
 
 	loadedRef := dagger.Ref[*dagger.GitRef](c, refID)
-	commit, err := loadedRef.Commit(ctx)
+	commit, err := loadedRef.CommitSHA(ctx)
 	require.NoError(t, err)
 	baseCommit := strings.TrimSpace(commit)
 
 	ws := loadedRef.AsWorkspace(dagger.GitRefAsWorkspaceOpts{Cwd: "/app"})
 
-	cleanHead, err := ws.Git().Head().Commit(ctx)
+	cleanHead, err := ws.Git().Head().CommitSHA(ctx)
 	require.NoError(t, err)
 	require.Equal(t, baseCommit, strings.TrimSpace(cleanHead))
 
@@ -336,7 +374,7 @@ func (WorkspaceSuite) TestOverlayGitRefWorkspaceReportsOverlayAsUncommitted(ctx 
 	require.NoError(t, err)
 	require.Equal(t, "overlay", overlayFile)
 
-	changedHead, err := changed.Git().Head().Commit(ctx)
+	changedHead, err := changed.Git().Head().CommitSHA(ctx)
 	require.NoError(t, err)
 	require.Equal(t, baseCommit, strings.TrimSpace(changedHead))
 
@@ -386,7 +424,7 @@ func (WorkspaceSuite) TestSyntheticWorkspaceManagementAPIsDoNotDependOnHostState
 	assertSyntheticWorkspaceListsAreEmpty(ctx, t, ws)
 
 	updated := ws.WithModule("github.com/dagger/dagger/modules/wolfi@v0.20.2")
-	added, err := updated.Changes().AddedPaths(ctx)
+	added, err := updated.Changes(dagger.WorkspaceChangesOpts{From: ws}).AddedPaths(ctx)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"dagger.lock", "dagger.toml"}, added)
 

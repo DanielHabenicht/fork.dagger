@@ -46,10 +46,6 @@ func (s *currentTypeDefsTestServer) CurrentFunctionCall(context.Context) (*core.
 	return nil, nil
 }
 
-func (s *currentTypeDefsTestServer) CurrentEnv(context.Context) (dagql.ObjectResult[*core.Env], error) {
-	return dagql.ObjectResult[*core.Env]{}, nil
-}
-
 func (s *currentTypeDefsTestServer) CurrentWorkspace(context.Context) (*core.Workspace, error) {
 	return nil, nil
 }
@@ -97,7 +93,7 @@ func (s *currentTypeDefsTestServer) MuxEndpoint(context.Context, string, http.Ha
 	return nil
 }
 
-func (s *currentTypeDefsTestServer) ServeHTTPToNestedClient(http.ResponseWriter, *http.Request, *engine.ClientMetadata, string, bool, dagql.AnyObjectResult, dagql.Typed, dagql.AnyObjectResult) {
+func (s *currentTypeDefsTestServer) ServeHTTPToNestedClient(http.ResponseWriter, *http.Request, *engine.ClientMetadata, string, bool, dagql.AnyObjectResult, dagql.Typed) {
 }
 
 func (s *currentTypeDefsTestServer) Auth(context.Context) (*auth.RegistryAuthProvider, error) {
@@ -141,6 +137,10 @@ func (s *currentTypeDefsTestServer) SnapshotManager() bkcache.SnapshotManager { 
 func (s *currentTypeDefsTestServer) Locker() *locker.Locker { return nil }
 
 func (s *currentTypeDefsTestServer) SecretSalt() []byte { return nil }
+
+func (s *currentTypeDefsTestServer) EngineVolumeState() core.EngineVolumeState {
+	return core.EngineVolumeState{}
+}
 
 func (s *currentTypeDefsTestServer) FlushSessionTelemetry(context.Context) error {
 	return nil
