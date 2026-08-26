@@ -82,6 +82,12 @@ func (apple) runArgs(name string, opts runOpts) (args []string, envs []string, _
 		// includes CAP_SYS_ADMIN, which the engine needs to bind-mount
 		// /etc/resolv.conf during network setup, so it must be granted explicitly.
 		args = append(args, "--cap-add", "ALL")
+
+		// apple's `container` boots each container in its own Linux VM where
+		// /proc/sys/net/ipv4/ip_forward is read-only, so the engine's CNI bridge
+		// setup fails with "failed to enable forwarding". Enable IP forwarding via
+		// a kernel boot arg so the sysctl is set before the engine starts.
+		args = append(args, "--kernel-arg", "sysctl.net.ipv4.ip_forward=1")
 	}
 
 	if opts.cpus != "" {

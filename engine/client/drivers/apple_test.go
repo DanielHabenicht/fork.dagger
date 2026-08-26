@@ -31,3 +31,27 @@ func TestAppleRunArgsNotPrivilegedOmitsCapabilities(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, args, "--cap-add")
 }
+
+func TestAppleRunArgsPrivilegedEnablesIPForwarding(t *testing.T) {
+	// Each apple `container` runs in its own Linux VM where
+	// /proc/sys/net/ipv4/ip_forward is read-only, so the engine's CNI bridge
+	// setup fails unless IP forwarding is enabled via a kernel boot arg.
+	args, _, err := apple{}.runArgs("dagger-engine-test", runOpts{
+		image:      "registry.dagger.io/engine:test",
+		privileged: true,
+	})
+	require.NoError(t, err)
+	idx := slices.Index(args, "--kernel-arg")
+	require.NotEqual(t, -1, idx, "expected --kernel-arg in args: %v", args)
+	require.Less(t, idx+1, len(args))
+	require.Equal(t, "sysctl.net.ipv4.ip_forward=1", args[idx+1])
+}
+
+func TestAppleRunArgsNotPrivilegedOmitsKernelArg(t *testing.T) {
+	args, _, err := apple{}.runArgs("dagger-engine-test", runOpts{
+		image:      "registry.dagger.io/engine:test",
+		privileged: false,
+	})
+	require.NoError(t, err)
+	require.NotContains(t, args, "--kernel-arg")
+}
